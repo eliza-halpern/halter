@@ -158,7 +158,7 @@ The checks shell out to `ruff`, `coverage` and `mutmut` by name, hence the
 
 ## License
 
-Copyright (C) 2026  Eliza H and Eryn Lipkowitz
+Copyright (C) 2026  Eliza Halpern and Eryn Lipkowitz
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as

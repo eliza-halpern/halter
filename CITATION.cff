@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 title: "halter"
 type: software
 authors:
-  - name: "Eliza H"
+  - name: "Eliza Halpern"
   - name: "Eryn Lipkowitz"
 version: "0.1.1"
 license: AGPL-3.0-or-later
