@@ -229,6 +229,7 @@ def test_audit_parser_defaults() -> None:
     )
     assert args.test_command == audit_module.AUDIT_TEST_COMMAND
     assert args.cache == audit_module.DEFAULT_AUDIT_CACHE
+    assert args.tiered is False
 
 
 # --- option plumbing ---------------------------------------------------------
@@ -275,3 +276,69 @@ def test_audit_rev_mode_accepts_a_relative_repo(
     assert (code, err.getvalue()) == (0, "")
     assert out.getvalue().rstrip().endswith("verdict: accept")
 
+
+# --- --tiered (ported from saddle tests/test_auditor.py, phase2-check 4a4b60d) ---
+
+
+def _tiered(repo: Path, *extra: str) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["--tiered", "--no-cache", *extra, "--repo", str(repo)], stdout=out, stderr=err)
+    return code, out.getvalue(), err.getvalue()
+
+
+@pytest.fixture
+def audit_uncovered(audit_clean: Path) -> Path:
+    """`audit_clean` plus an untracked `m.py` no test runs: tier 1's coverage fails."""
+    (audit_clean / "m.py").write_text("def g():\n    return 7\n")
+    return audit_clean
+
+
+def test_tiered_accepts_a_correct_change(audit_clean: Path) -> None:
+    code, out, err = _tiered(audit_clean)
+    assert (code, err) == (0, "")
+    assert out.rstrip().endswith("verdict: accept")
+    assert "tier 2" in out
+    assert "[evidence-thin]" in out
+
+
+def test_tiered_refuses_with_exit_one_and_json(audit_uncovered: Path) -> None:
+    code, out, _err = _tiered(audit_uncovered, "--json")
+    assert code == 1
+    payload = json.loads(out)
+    assert payload["verdict"] == "refuse"
+    assert [t["tier"] for t in payload["tiers"]] == [0, 0, 0, 1, 2]
+    assert [t["passed"] for t in payload["tiers"]] == [True, True, True, False, False]
+    blocked = payload["tiers"][-1]["findings"]
+    assert [(f["gate"], f["verdict"], f["reason"]) for f in blocked] == [
+        ("mutation", "blocked", "unknown")
+    ]
+    assert blocked[0]["detail"] == "tier 1 failed (coverage); tier 2 not run"
+
+
+def test_tiered_text_report_is_one_line_per_finding(audit_uncovered: Path) -> None:
+    code, out, _err = _tiered(audit_uncovered)
+    assert code == 1
+    lines = out.splitlines()
+    assert [ln.split()[:2] for ln in lines if ln.startswith("tier ")] == [
+        ["tier", "0"],
+        ["tier", "0"],
+        ["tier", "0"],
+        ["tier", "1"],
+        ["tier", "2"],
+    ]
+    assert any(ln.split()[:3] == ["fail", "coverage", "[evidence-thin]"] for ln in lines)
+    assert lines[-2].split()[:3] == ["blocked", "mutation", "[unknown]"]
+    assert lines[-1] == "verdict: refuse"
+
+
+def test_tiered_rev_mode_and_exit_codes(audit_clean: Path) -> None:
+    _audit_git(audit_clean, "add", "-A")
+    _audit_git(audit_clean, "commit", "-m", "fix")
+    code, out, _err = _tiered(audit_clean, "HEAD")
+    assert code == 0, out
+    code, out, _err = _tiered(audit_clean)
+    assert code == 3
+    assert out.rstrip().endswith("verdict: nothing to audit")
+    code, _out, err = _tiered(audit_clean, "--baseline", "no-such-base")
+    assert code == 2
+    assert "no-such-base" in err

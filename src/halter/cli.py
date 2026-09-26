@@ -1,10 +1,12 @@
 """The `halter` command.
 
 `halter [REV] [--repo R] [--baseline B] [--test-command C] [--json]
-[--cache DIR | --no-cache]` audits one tree of a git repository against a
-baseline commit and exits 0 (accept), 1 (refuse), 2 (could not audit) or
-3 (nothing to audit). `run_audit` does the work; `build_parser` declares
-the arguments; `main` joins the two.
+[--cache DIR | --no-cache] [--tiered]` audits one tree of a git repository
+against a baseline commit and exits 0 (accept), 1 (refuse), 2 (could not
+audit) or 3 (nothing to audit). `--tiered` runs the same checks as tiers
+0-2 (`halter.auditor`) and reports findings instead of checks, under the
+same exit codes. `run_audit` does the work; `build_parser` declares the
+arguments; `main` joins the two.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import IO, Final
 
 from halter import __version__, audit
 from halter.audit import AuditError, AuditResult, audit_tree
+from halter.auditor import Auditor, AuditorConfig, Findings
 from halter.evidence import run_capture
 
 AUDIT_EXIT_CODES: Final = {"accept": 0, "refuse": 1, "nothing-to-audit": 3}
@@ -59,9 +62,10 @@ def run_audit(args: argparse.Namespace, *, stdout: IO[str], stderr: IO[str]) -> 
     """
     cache = None if args.no_cache else Path(args.cache).expanduser()
     rev: str | None = args.rev
+    audit_one = _tiered_audit if args.tiered else audit_tree
     try:
         if rev is None:
-            result = audit_tree(
+            result = audit_one(
                 Path(args.repo),
                 args.baseline or "HEAD",
                 test_command=args.test_command,
@@ -87,7 +91,7 @@ def run_audit(args: argparse.Namespace, *, stdout: IO[str], stderr: IO[str]) -> 
                     rev,
                     what=f"cannot check out revision {rev!r}",
                 )
-                result = audit_tree(
+                result = audit_one(
                     clone,
                     args.baseline or f"{rev}^",
                     test_command=args.test_command,
@@ -96,11 +100,43 @@ def run_audit(args: argparse.Namespace, *, stdout: IO[str], stderr: IO[str]) -> 
     except AuditError as exc:
         print(f"error: {exc}", file=stderr)
         return AUDIT_COULD_NOT_AUDIT
+    if isinstance(result, tuple):
+        return _report_tiered(result, args.json, stdout)
     if args.json:
         stdout.write(json.dumps(result.to_dict(), indent=2) + "\n")
     else:
         _render_audit(result, stdout)
     return AUDIT_EXIT_CODES[result.verdict]
+
+
+def _tiered_audit(
+    tree: Path, baseline: str, *, test_command: str, cache: Path | None
+) -> tuple[Findings, ...] | AuditResult:
+    """`halter --tiered`: tiers 0-2 (`halter.auditor`) over the same tree
+    `audit_tree` would audit; an unchanged tree is `nothing-to-audit` as there."""
+    auditor = Auditor(tree, baseline, AuditorConfig(test_command=test_command, cache_dir=cache))
+    try:
+        return auditor.audit()
+    except AuditError as exc:
+        if not str(exc).startswith("nothing to audit"):
+            raise
+        return audit_tree(tree, baseline, test_command=test_command, cache=None)
+
+
+def _report_tiered(results: tuple[Findings, ...], as_json: bool, stdout: IO[str]) -> int:
+    """One line per finding, then the verdict; exit as `AUDIT_EXIT_CODES`."""
+    verdict = "accept" if all(r.passed for r in results) else "refuse"
+    if as_json:
+        payload = {"verdict": verdict, "tiers": [r.to_dict() for r in results]}
+        stdout.write(json.dumps(payload, indent=2) + "\n")
+    else:
+        for r in results:
+            freshness = "cached" if r.cached else "fresh"
+            stdout.write(f"tier {r.tier} {r.key[:12]} {freshness}\n")
+            for f in r.findings:
+                stdout.write(f"{f.verdict:<14} {f.gate:<22} [{f.reason}] {f.detail}\n")
+        stdout.write(f"verdict: {verdict}\n")
+    return AUDIT_EXIT_CODES[verdict]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--no-cache", action="store_true", help="Neither read nor write the verdict cache."
+    )
+    parser.add_argument(
+        "--tiered",
+        action="store_true",
+        help="Run the tiered battery (tier 0 per changed file, tier 1, tier 2).",
     )
     return parser
 
