@@ -24,8 +24,8 @@ tools' versions) all match a stored key exactly. Any other file state -- a
 missing file, unparseable JSON, a mismatched key -- is a miss, never a verdict
 and never an exception. `nothing-to-audit` is never cached.
 
-Layering: this module imports `dag`, `evidence`, `journal` and `runner`;
-only `cli` imports it.
+Layering: this module imports `dag`, `evidence`, `gates`, `journal` and
+`runner`; only `cli` imports it.
 """
 
 from __future__ import annotations
@@ -39,13 +39,15 @@ import os
 import platform
 import shutil
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal, cast
 
 from halter.dag import Node
 from halter.evidence import MutationOutcome, run_capture
+from halter.gates import GateCheck
 from halter.journal import SpanRecorder
 from halter.runner import run_node_gate
 
@@ -340,6 +342,59 @@ def _spelled_from_the_root(
     return checks, mutation
 
 
+@contextmanager
+def staged_copy(tree: Path, baseline: str) -> Iterator[tuple[Path, str, str]]:
+    """A scratch copy of `tree` with everything staged: `(copy, staged, resolved)`.
+
+    `staged` is the copy's `git write-tree`, the key every audit verdict is
+    stored under; `resolved` is the 40-hex commit `baseline` names. The copy
+    is deleted on exit, so `tree` -- its files and `.git/index` -- is never
+    written to. Shared by `audit_tree` and `halter.auditor`.
+    """
+    # A linked worktree's `.git` is a file naming a gitdir outside the tree: a
+    # copy of it would still write to that original, and `git add -A` changes
+    # the index even when no source byte moves.
+    if not (tree / ".git").is_dir():
+        msg = f"{tree} is not a git repository (no .git directory)"
+        raise AuditError(msg)
+    with tempfile.TemporaryDirectory() as scratch:
+        copy = Path(scratch) / "tree"
+        shutil.copytree(tree, copy, ignore=_audit_ignore(tree))
+        # Untracked files must be staged: `git diff <ref>` sees tracked files
+        # only, so a new module would be invisible to every check.
+        _git(copy, "add", "-A")
+        try:
+            resolved = _git(copy, "rev-parse", "--verify", f"{baseline}^{{commit}}")
+        except AuditError as exc:
+            msg = f"cannot resolve baseline {baseline!r}: {exc}"
+            raise AuditError(msg) from exc
+        yield copy, _git(copy, "write-tree"), resolved
+
+
+def baseline_tree(copy: Path, resolved: str) -> str:
+    """The tree id of commit `resolved`, read in `copy`."""
+    return _git(copy, "rev-parse", f"{resolved}^{{tree}}")
+
+
+def audit_checks(
+    gate_checks: Sequence[GateCheck], mutation: MutationOutcome | None, copy: Path
+) -> tuple[tuple[AuditCheck, ...], MutationOutcome | None]:
+    """Checks as audit checks: the declaration-relative ones `not-applicable`,
+    paths spelled from the tree's root rather than the scratch `copy`."""
+    checks = tuple(
+        AuditCheck(
+            name=check.name,
+            status="not-applicable"
+            if check.name in NOT_APPLICABLE
+            else ("pass" if check.passed else "fail"),
+            detail=NOT_APPLICABLE.get(check.name, check.detail),
+            basis=check.basis,
+        )
+        for check in gate_checks
+    )
+    return _spelled_from_the_root(checks, mutation, copy)
+
+
 def audit_tree(
     tree: Path,
     baseline: str = "HEAD",
@@ -355,26 +410,9 @@ def audit_tree(
     `cached=True`; `nothing-to-audit` is never cached. `recorder`, when given,
     receives one span per subprocess the checks run.
     """
-    # A linked worktree's `.git` is a file naming a gitdir outside the tree: a
-    # copy of it would still write to that original, and `git add -A` changes
-    # the index even when no source byte moves.
-    if not (tree / ".git").is_dir():
-        msg = f"{tree} is not a git repository (no .git directory)"
-        raise AuditError(msg)
     surface = gate_surface()
-    with tempfile.TemporaryDirectory() as scratch:
-        copy = Path(scratch) / "tree"
-        shutil.copytree(tree, copy, ignore=_audit_ignore(tree))
-        # Untracked files must be staged: `git diff <ref>` sees tracked files
-        # only, so a new module would be invisible to every check.
-        _git(copy, "add", "-A")
-        try:
-            resolved = _git(copy, "rev-parse", "--verify", f"{baseline}^{{commit}}")
-        except AuditError as exc:
-            msg = f"cannot resolve baseline {baseline!r}: {exc}"
-            raise AuditError(msg) from exc
-        staged = _git(copy, "write-tree")
-        if staged == _git(copy, "rev-parse", f"{resolved}^{{tree}}"):
+    with staged_copy(tree, baseline) as (copy, staged, resolved):
+        if staged == baseline_tree(copy, resolved):
             return AuditResult(
                 verdict="nothing-to-audit",
                 tree=staged,
@@ -392,18 +430,7 @@ def audit_tree(
             if hit is not None:
                 return hit
         gated = run_node_gate(audit_node(test_command), copy, baseline=resolved, recorder=recorder)
-    checks = tuple(
-        AuditCheck(
-            name=check.name,
-            status="not-applicable"
-            if check.name in NOT_APPLICABLE
-            else ("pass" if check.passed else "fail"),
-            detail=NOT_APPLICABLE.get(check.name, check.detail),
-            basis=check.basis,
-        )
-        for check in gated.checks
-    )
-    checks, mutation = _spelled_from_the_root(checks, gated.mutation, copy)
+        checks, mutation = audit_checks(gated.checks, gated.mutation, copy)
     result = AuditResult(
         verdict="refuse" if any(check.status == "fail" for check in checks) else "accept",
         tree=staged,

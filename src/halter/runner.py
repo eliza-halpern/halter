@@ -45,6 +45,10 @@ from halter.gates import (
 )
 from halter.journal import SpanRecorder
 
+# The placeholder survivor a `tier2=False` run carries in place of a mutation
+# sample: never a verdict, only a marker that nothing was measured.
+NOT_MEASURED_AT_TIER1 = "not measured: tier-1 checkpoint"
+
 
 def read_sources(root: Path, pattern: str) -> dict[str, str]:
     """Map workdir-relative posix paths to text for files matching `pattern`."""
@@ -116,6 +120,7 @@ def run_node_gate(
     capture: list[CapturedRun] | None = None,
     planned_requirements: tuple[str, ...] = (),
     owed_tests: tuple[str, ...] = (),
+    tier2: bool = True,
 ) -> Tier1Result:
     """Run every check over `workdir` under `node`'s declaration; `baseline` is the pre-change ref.
 
@@ -124,6 +129,13 @@ def run_node_gate(
     changes still expected to add tests, which defers an uncovered changed
     line instead of failing on it. The audit passes neither, so every
     citation must be declared and every uncovered line counts.
+
+    `tier2=False` (the checkpoint tier, `halter.auditor`) skips the three
+    evidence legs only tier 2 reads -- the mutation run, the property
+    oracle and all but one red-phase baseline sample (`check_red_phase`
+    cannot run on none) -- so the `mutation`, `property-coverage` and
+    `red-phase` checks in the result are computed over a placeholder and
+    must not be read. The default is the full battery, unchanged.
 
     The current-tree suite runs once under coverage and its exit code
     serves both the tests check and the red-phase post leg; the baseline
@@ -204,7 +216,9 @@ def run_node_gate(
         # evidence nothing consumes. A `test` change has no baseline leg:
         # its red-phase mirrors the tests verdict, so the samples would be
         # evidence nothing reads.
-        samples = 0 if node.kind == "test" else (RED_PHASE_SAMPLES if tests_changed else 1)
+        samples = (
+            0 if node.kind == "test" else (RED_PHASE_SAMPLES if tests_changed and tier2 else 1)
+        )
         baseline_exits: list[int] = []
         baseline_output = ""
         for sample_index in range(samples):
@@ -239,6 +253,8 @@ def run_node_gate(
     mutation = (
         MutationOutcome(killed=0, total=0, generated=0, survivors=())
         if node.kind == "test"
+        else MutationOutcome(killed=0, total=0, generated=0, survivors=(NOT_MEASURED_AT_TIER1,))
+        if not tier2
         else mutation_sample(
             workdir,
             changed,
@@ -271,7 +287,7 @@ def run_node_gate(
             suite_passed=current_exit == 0,
             recorder=recorder,
         )
-        if node.kind == "impl" and property_targets
+        if tier2 and node.kind == "impl" and property_targets
         else None
     )
     added_lines: dict[str, list[int]] = {}
