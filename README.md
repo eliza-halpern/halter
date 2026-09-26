@@ -40,6 +40,48 @@ the baseline, the test command and a hash of halter's own check modules
 and tool versions, so a second audit of the same tree is served without
 re-running anything. `--no-cache` disables that.
 
+## Tiered mode
+
+`halter --tiered` runs the same checks split into three tiers and reports
+one finding per check instead of one line per check. It is opt-in: without
+the flag, halter's report, JSON and verdict are exactly as before.
+
+| tier | checks | runs |
+|------|--------|------|
+| 0 | `syntax`, `ruff`, `imports` | once per changed Python file, on that file's text alone; no tests run |
+| 1 | `tests`, `coverage`, `dead-code`, `public-deletions`, `node-scope`, `target-scope`, `assertion-preservation` | the test command once under coverage, one red-phase baseline sample, no mutation run |
+| 2 | `mutation`, `property-coverage`, `red-phase`, `requirement-binding`, `full-suite` | the full battery; `full-suite` is the `tests` check of that run |
+
+- `imports` is the one check the default mode does not have: every
+  absolute import's top-level name must be the standard library, a module
+  in the tree (its root, the file's directory or `src/`), or importable by
+  **halter's own interpreter**. A tree whose dependencies are installed
+  only in another environment fails it; install them where halter runs
+  (the mutation run already needs them there).
+- Tier 2 never runs on a tree whose tier 1 failed. It reports a single
+  finding, `blocked`, naming the tier-1 checks that failed, and the verdict
+  is `refuse`. Mutation, red-phase and the other tier-2 checks are then
+  neither run nor reported.
+- Each finding carries a reason: `code-wrong` (syntax, ruff, imports,
+  tests, public-deletions, full-suite), `evidence-thin` (coverage,
+  dead-code, assertion-preservation, mutation, property-coverage,
+  red-phase, requirement-binding), `scope` (node-scope, target-scope) or
+  `unknown` (a `blocked` tier 2, or a mutation tool that decided nothing).
+- Finding verdicts are `pass`, `fail`, `not-applicable` or `blocked`; the
+  run's verdict is `accept` only when every tier passed. Exit codes are
+  the same four as the default mode; an unchanged tree prints the default
+  mode's `nothing to audit` report and exits 3.
+- Tier 1 and tier 2 each run the test command, so a tiered audit runs the
+  tests at least twice where the default mode runs them once.
+- Verdicts are cached per tier in the same `--cache` directory, keyed by
+  the staged tree (tier 0: the file's path and bytes), the baseline, the
+  test command and the check surface.
+
+With `--json` the output is `{"verdict": ..., "tiers": [{"tier", "key",
+"passed", "cached", "findings": [{"gate", "tier", "verdict", "reason",
+"detail", "cites"}]}]}`; `cites` names the function the verdict came from,
+then the check's basis when it has one.
+
 ## Exit codes
 
 | exit | verdict            | meaning                                                               |
@@ -61,6 +103,7 @@ exit code is the same.
     halter --test-command CMD    # default: python -m pytest -q
     halter --json                # machine-readable result
     halter --no-cache            # neither read nor write the verdict cache
+    halter --tiered              # tiers 0-2, one finding per check
 
 In `REV` mode the commit is checked out in a temporary clone, so nothing
 uncommitted in the source repository reaches the checks and nothing is
