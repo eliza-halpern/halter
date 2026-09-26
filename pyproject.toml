@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
-authors = [{ name = "Eliza H" }]
+authors = [{ name = "Eliza H" }, { name = "Eryn Lipkowitz" }]
 dependencies = [
     "coverage>=7.0",
     "pydantic>=2.13.5",
