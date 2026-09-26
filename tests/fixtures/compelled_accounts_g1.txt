@@ -1,0 +1,99 @@
+"""Multi-currency account ledger.
+
+Accounts hold per-currency balances as Decimal values. Supported
+currencies: USD, EUR, JPY.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from money import quantize, quantize_positive, to_decimal, validate_currency
+
+
+class Account:
+    """A multi-currency account with per-currency Decimal balances."""
+
+    def __init__(self, owner, balance=0.0):
+        if not owner:
+            raise ValueError("owner must be a non-empty string")
+        self.owner = owner
+        self._balances = {}
+        opening = to_decimal(balance)
+        quantized = quantize(opening, "USD")
+        if quantized < 0:
+            raise ValueError("opening balance must be >= 0")
+        if quantized > 0:
+            self._balances["USD"] = quantized
+
+    def __eq__(self, other):
+        if not isinstance(other, Account):
+            return NotImplemented
+        return self.owner == other.owner and self._balances == other._balances
+
+    def __repr__(self):
+        parts = ", ".join(f"{k}={v}" for k, v in sorted(self._balances.items()))
+        return f"Account({self.owner!r}, {parts})"
+
+    @classmethod
+    def from_dict(cls, data):
+        """Construct an Account from a dict with 'owner' and optional 'balances'."""
+        owner = data["owner"]
+        acc = cls.__new__(cls)
+        acc.owner = owner
+        acc._balances = {}
+        balances = data.get("balances", {})
+        for currency, value in balances.items():
+            validate_currency(currency)
+            acc._balances[currency] = to_decimal(value)
+        return acc
+
+    def to_dict(self):
+        """Serialize to a dict with 'owner' and 'balances' (Decimal strings)."""
+        return {
+            "owner": self.owner,
+            "balances": {k: str(v) for k, v in self._balances.items()},
+        }
+
+    @property
+    def balance(self):
+        """Current USD balance as a Decimal (0.00 if no USD stored)."""
+        return self._balances.get("USD", Decimal("0.00"))
+
+    @property
+    def balances(self):
+        """Dict copy of all per-currency balances."""
+        return dict(self._balances)
+
+    def deposit(self, amount, currency="USD"):
+        """Add funds in the given currency; returns the new Decimal balance."""
+        validate_currency(currency)
+        value = to_decimal(amount)
+        quantized = quantize_positive(value, currency)
+        current = self._balances.get(currency, Decimal("0"))
+        new_balance = quantize(current + quantized, currency)
+        self._balances[currency] = new_balance
+        return new_balance
+
+    def withdraw(self, amount, currency="USD"):
+        """Remove funds in the given currency; returns the new Decimal balance."""
+        validate_currency(currency)
+        value = to_decimal(amount)
+        quantized = quantize_positive(value, currency)
+        current = self._balances.get(currency, Decimal("0"))
+        if quantized > current:
+            raise ValueError("insufficient funds")
+        new_balance = quantize(current - quantized, currency)
+        self._balances[currency] = new_balance
+        return new_balance
+
+
+def transfer(source, target, amount, currency="USD"):
+    """Move funds between two accounts in the given currency."""
+    validate_currency(currency)
+    value = to_decimal(amount)
+    quantized = quantize_positive(value, currency)
+    source.withdraw(quantized, currency)
+    target.deposit(quantized, currency)
+    return quantized
+

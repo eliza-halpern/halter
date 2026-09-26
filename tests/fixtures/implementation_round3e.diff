@@ -1,0 +1,350 @@
+diff --git a/money.py b/money.py
+new file mode 100644
+--- /dev/null
++++ b/money.py
+@@ -0,0 +1,50 @@
++"""Shared money helpers: type conversion, rounding, and currency validation.
++
++REQ-002: Provides the single money concept used across the ledger.
++"""
++
++from __future__ import annotations
++
++from decimal import Decimal, ROUND_HALF_UP
++
++SUPPORTED_CURRENCIES = ("USD", "EUR", "JPY")
++
++
++def to_decimal(value):
++    """Convert int, str, Decimal, or float to Decimal.
++
++    Floats are converted via Decimal(str(value)) to avoid binary
++    floating-point artifacts. Any other type raises TypeError.
++    """
++    if isinstance(value, Decimal):
++        return value
++    if isinstance(value, int):
++        return Decimal(value)
++    if isinstance(value, str):
++        return Decimal(value)
++    if isinstance(value, float):
++        return Decimal(str(value))
++    raise TypeError(
++        "amount must be int, str, Decimal, or float, got %s"
++        % type(value).__name__
++    )
++
++
++def quantize(amount, currency):
++    """Quantize a Decimal to the appropriate places for the currency.
++
++    USD and EUR: 2 decimal places. JPY: 0 decimal places.
++    Uses ROUND_HALF_UP.
++    """
++    validate_currency(currency)
++    if currency == "JPY":
++        return amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
++    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
++
++
++def validate_currency(currency):
++    """Raise ValueError if currency is not one of the supported currencies.
++
++    The error message names all supported currencies: USD, EUR, and JPY.
++    """
++    if currency not in SUPPORTED_CURRENCIES:
++        raise ValueError(
++            "unsupported currency %r; supported currencies are USD, EUR, and JPY"
++            % (currency,)
++        )
+diff --git a/accounts.py b/accounts.py
+--- a/accounts.py
++++ b/accounts.py
+@@ -1,80 +1,105 @@
+-"""USD-only account ledger.
+-
+-Single-currency accounts denominated in US dollars. Balances are
+-floats rounded to cents after every operation.
+-"""
+-
+-from __future__ import annotations
+-
+-
+-def _usd(amount):
+-    """Coerce an amount to a USD float rounded to cents."""
+-    return round(float(amount), 2)
+-
+-
+-class Account:
+-    """A simple USD-denominated account."""
+-
+-    def __init__(self, owner, balance=0.0):
+-        if not owner:
+-            raise ValueError("owner must be a non-empty string")
+-        opening = _usd(balance)
+-        if opening < 0:
+-            raise ValueError("opening balance must be >= 0")
+-        self.owner = owner
+-        self._balance = opening
+-
+-    @property
+-    def balance(self):
+-        """Current USD balance as a float."""
+-        return self._balance
+-
+-    def deposit(self, amount):
+-        """Add funds; returns the new balance."""
+-        credit = _usd(amount)
+-        if credit <= 0:
+-            raise ValueError("deposit amount must be positive")
+-        self._balance = _usd(self._balance + credit)
+-        return self._balance
+-
+-    def withdraw(self, amount):
+-        """Remove funds; returns the new balance."""
+-        debit = _usd(amount)
+-        if debit <= 0:
+-            raise ValueError("withdrawal amount must be positive")
+-        if debit > self._balance:
+-            raise ValueError("insufficient funds")
+-        self._balance = _usd(self._balance - debit)
+-        return self._balance
+-
+-    def to_dict(self):
+-        """Serialize to the USD-only record schema."""
+-        return {"owner": self.owner, "balance": self._balance}
+-
+-    @classmethod
+-    def from_dict(cls, data):
+-        """Rebuild an account from a USD-only record."""
+-        return cls(data["owner"], data.get("balance", 0.0))
+-
+-    def __eq__(self, other):
+-        if not isinstance(other, Account):
+-            return NotImplemented
+-        return self.owner == other.owner and self.balance == other.balance
+-
+-    def __repr__(self):
+-        return "Account(owner=%r, balance=%r)" % (self.owner, self._balance)
+-
+-
+-def transfer(source, target, amount):
+-    """Move funds between two accounts; returns the amount moved."""
+-    moved = _usd(amount)
+-    source.withdraw(moved)
+-    target.deposit(moved)
+-    return moved
++"""Multi-currency account ledger.
++
++REQ-003: Accounts hold per-currency Decimal balances. Supported
++currencies: USD, EUR, JPY.
++"""
++
++from __future__ import annotations
++
++from decimal import Decimal
++
++from money import quantize, to_decimal, validate_currency
++
++
++class Account:
++    """A multi-currency account with per-currency Decimal balances."""
++
++    def __init__(self, owner, balance=0.0):
++        if not owner:
++            raise ValueError("owner must be a non-empty string")
++        opening = to_decimal(balance)
++        opening = quantize(opening, "USD")
++        if opening < 0:
++            raise ValueError("opening balance must be >= 0")
++        self.owner = owner
++        self._balances = {
++            "USD": opening,
++            "EUR": Decimal("0.00"),
++            "JPY": Decimal("0"),
++        }
++
++    @property
++    def balance(self):
++        """Current USD balance as a Decimal."""
++        return self._balances["USD"]
++
++    @property
++    def balances(self):
++        """Dict copy of all per-currency balances."""
++        return dict(self._balances)
++
++    def deposit(self, amount, currency="USD"):
++        """Add funds in the given currency; returns the new balance."""
++        validate_currency(currency)
++        value = to_decimal(amount)
++        value = quantize(value, currency)
++        if value <= 0:
++            raise ValueError("deposit amount must be positive")
++        self._balances[currency] += value
++        return self._balances[currency]
++
++    def withdraw(self, amount, currency="USD"):
++        """Remove funds in the given currency; returns the new balance."""
++        validate_currency(currency)
++        value = to_decimal(amount)
++        value = quantize(value, currency)
++        if value <= 0:
++            raise ValueError("withdrawal amount must be positive")
++        if value > self._balances[currency]:
++            raise ValueError("insufficient funds")
++        self._balances[currency] -= value
++        return self._balances[currency]
++
++    def to_dict(self):
++        """Serialize to the version-2 record schema."""
++        return {
++            "owner": self.owner,
++            "balances": {k: str(v) for k, v in self._balances.items()},
++        }
++
++    @classmethod
++    def from_dict(cls, data):
++        """Rebuild an account from a version-2 record."""
++        owner = data["owner"]
++        balances = data.get("balances", {})
++        acc = cls.__new__(cls)
++        acc.owner = owner
++        acc._balances = {}
++        for cur in ("USD", "EUR", "JPY"):
++            if cur in balances:
++                acc._balances[cur] = Decimal(balances[cur])
++            else:
++                acc._balances[cur] = (
++                    Decimal("0.00") if cur != "JPY" else Decimal("0")
++                )
++        return acc
++
++    def __eq__(self, other):
++        if not isinstance(other, Account):
++            return NotImplemented
++        return self.owner == other.owner and self._balances == other._balances
++
++    def __repr__(self):
++        return "Account(owner=%r, balances=%r)" % (self.owner, self._balances)
++
++
++def transfer(source, target, amount, currency="USD"):
++    """Move funds between two accounts in the given currency."""
++    validate_currency(currency)
++    value = to_decimal(amount)
++    value = quantize(value, currency)
++    if value <= 0:
++        raise ValueError("transfer amount must be positive")
++    source.withdraw(value, currency)
++    target.deposit(value, currency)
++    return value
+diff --git a/fees.py b/fees.py
+--- a/fees.py
++++ b/fees.py
+@@ -1,50 +1,62 @@
+-"""Flat USD fee schedule.
+-
+-Every transaction pays the same flat fee in US dollars. The fee is
+-deducted from the transaction amount to produce the net credited
+-amount; batch callers can price many transactions up front with
+-total_fees.
+-"""
+-
+-from __future__ import annotations
+-
+-FLAT_FEE = 0.30
+-
+-
+-def fee_for(amount):
+-    """Return the flat USD fee charged on a transaction amount.
+-
+-    The fee does not depend on the amount; the argument exists so
+-    callers can validate the amount against the fee schedule.
+-    Amounts below the fee cannot cover it and are rejected.
+-    """
+-    value = round(float(amount), 2)
+-    if value < FLAT_FEE:
+-        raise ValueError(
+-            "amount %.2f is below the flat fee %.2f" % (value, FLAT_FEE)
+-        )
+-    return FLAT_FEE
+-
+-
+-def apply_fee(amount):
+-    """Deduct the flat USD fee; returns the net amount."""
+-    net = round(float(amount), 2) - fee_for(amount)
+-    return round(net, 2)
+-
+-
+-def total_fees(count):
+-    """Return the combined flat USD fees for count transactions."""
+-    if isinstance(count, bool) or not isinstance(count, int):
+-        raise TypeError("count must be an int")
+-    if count < 0:
+-        raise ValueError("count must be >= 0")
+-    return round(FLAT_FEE * count, 2)
++"""Per-currency fee schedule.
++
++REQ-004: Fees vary by currency: USD 0.30, EUR 0.25, JPY 30.
++"""
++
++from __future__ import annotations
++
++from decimal import Decimal
++
++from money import quantize, to_decimal, validate_currency
++
++FEES = {
++    "USD": Decimal("0.30"),
++    "EUR": Decimal("0.25"),
++    "JPY": Decimal("30"),
++}
++
++
++def fee_for(amount, currency="USD"):
++    """Return the fee for the given currency.
++
++    Validates the amount type and currency. The fee is a fixed
++    value per currency regardless of the amount.
++    """
++    validate_currency(currency)
++    to_decimal(amount)
++    return FEES[currency]
++
++
++def apply_fee(amount, currency="USD"):
++    """Deduct the currency fee; returns the net amount as Decimal.
++
++    Raises ValueError when the quantized amount is below the fee.
++    """
++    validate_currency(currency)
++    value = to_decimal(amount)
++    value = quantize(value, currency)
++    if value < FEES[currency]:
++        raise ValueError(
++            "amount %s is below the fee %s for %s"
++            % (value, FEES[currency], currency)
++        )
++    net = value - FEES[currency]
++    return quantize(net, currency)
++
++
++def total_fees(count, currency="USD"):
++    """Return the combined fees for count transactions in the given currency.
++
++    Raises TypeError for non-int counts and ValueError for negative counts.
++    """
++    validate_currency(currency)
++    if isinstance(count, bool) or not isinstance(count, int):
++        raise TypeError("count must be an int")
++    if count < 0:
++        raise ValueError("count must be >= 0")
++    return quantize(FEES[currency] * count, currency)
++
++
++# Keep FLAT_FEE as a deprecated alias for backward compatibility.
++FLAT_FEE = FEES["USD"]
++
++
++__all__ = ["FEES", "FLAT_FEE", "apply_fee", "fee_for", "total_fees"]

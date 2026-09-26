@@ -1,0 +1,73 @@
+"""USD-only account ledger.
+
+Single-currency accounts denominated in US dollars. Balances are
+floats rounded to cents after every operation.
+"""
+
+from __future__ import annotations
+
+
+def _usd(amount):
+    """Coerce an amount to a USD float rounded to cents."""
+    return round(float(amount), 2)
+
+
+class Account:
+    """A simple USD-denominated account."""
+
+    def __init__(self, owner, balance=0.0):
+        if not owner:
+            raise ValueError("owner must be a non-empty string")
+        opening = _usd(balance)
+        if opening < 0:
+            raise ValueError("opening balance must be >= 0")
+        self.owner = owner
+        self._balance = opening
+
+    @property
+    def balance(self):
+        """Current USD balance as a float."""
+        return self._balance
+
+    def deposit(self, amount):
+        """Add funds; returns the new balance."""
+        credit = _usd(amount)
+        if credit <= 0:
+            raise ValueError("deposit amount must be positive")
+        self._balance = _usd(self._balance + credit)
+        return self._balance
+
+    def withdraw(self, amount):
+        """Remove funds; returns the new balance."""
+        debit = _usd(amount)
+        if debit <= 0:
+            raise ValueError("withdrawal amount must be positive")
+        if debit > self._balance:
+            raise ValueError("insufficient funds")
+        self._balance = _usd(self._balance - debit)
+        return self._balance
+
+    def to_dict(self):
+        """Serialize to the USD-only record schema."""
+        return {"owner": self.owner, "balance": self._balance}
+
+    @classmethod
+    def from_dict(cls, data):
+        """Rebuild an account from a USD-only record."""
+        return cls(data["owner"], data.get("balance", 0.0))
+
+    def __eq__(self, other):
+        if not isinstance(other, Account):
+            return NotImplemented
+        return self.owner == other.owner and self.balance == other.balance
+
+    def __repr__(self):
+        return "Account(owner=%r, balance=%r)" % (self.owner, self._balance)
+
+
+def transfer(source, target, amount):
+    """Move funds between two accounts; returns the amount moved."""
+    moved = _usd(amount)
+    source.withdraw(moved)
+    target.deposit(moved)
+    return moved
