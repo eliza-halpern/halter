@@ -676,3 +676,32 @@ def test_default_gate_surface_moves_with_each_tools_installed_version(
 
     monkeypatch.setattr(importlib.metadata, "version", unrelated)
     assert gate_surface() == base
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "halter.audit",
+        "halter.auditor",
+        "halter.runner",
+        "halter.gates",
+        "halter.evidence",
+        "halter.dag",
+    ],
+)
+def test_default_gate_surface_moves_with_each_check_modules_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    """The no-argument surface hashes every module whose bytes decide a
+    verdict, the tiered battery's included: one edited byte in any of them
+    is a different surface, so no cached verdict outlives the code that
+    reached it. The list is spelled out here, not read from SURFACE_MODULES,
+    so dropping a module from that tuple is a failure, not a smaller test."""
+    import importlib
+
+    target = importlib.import_module(module)
+    base = gate_surface()
+    edited = tmp_path / "edited.py"
+    edited.write_bytes(Path(str(target.__file__)).read_bytes() + b"\n# one more line\n")
+    monkeypatch.setattr(target, "__file__", str(edited))
+    assert gate_surface() != base

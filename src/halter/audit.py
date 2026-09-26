@@ -25,7 +25,7 @@ missing file, unparseable JSON, a mismatched key -- is a miss, never a verdict
 and never an exception. `nothing-to-audit` is never cached.
 
 Layering: this module imports `dag`, `evidence`, `gates`, `journal` and
-`runner`; only `cli` imports it.
+`runner`; only `cli` and `auditor` (the tiered battery) import it.
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ DEFAULT_AUDIT_CACHE: Final = Path("~/.cache/halter/audit")
 # to, in the order `gate_surface()` hashes them.
 SURFACE_MODULES: Final[tuple[str, ...]] = (
     "halter.audit",
+    "halter.auditor",
     "halter.runner",
     "halter.gates",
     "halter.evidence",
