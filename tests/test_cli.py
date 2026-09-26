@@ -342,3 +342,23 @@ def test_tiered_rev_mode_and_exit_codes(audit_clean: Path) -> None:
     code, _out, err = _tiered(audit_clean, "--baseline", "no-such-base")
     assert code == 2
     assert "no-such-base" in err
+
+
+def test_version_is_one_string_everywhere_it_is_recorded(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Contract: `halter --version` prints the version pyproject.toml ships,
+    and CITATION.cff records the same one. A release that bumps one and not
+    the others would publish a wheel that misreports itself."""
+    import re
+    import tomllib
+
+    root = Path(__file__).resolve().parent.parent
+    shipped = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    cited = re.search(r'^version: "([^"]+)"$', (root / "CITATION.cff").read_text(), re.M)
+    assert cited is not None
+    assert cited.group(1) == shipped
+    with pytest.raises(SystemExit) as exit_info:
+        build_parser().parse_args(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"halter {shipped}"

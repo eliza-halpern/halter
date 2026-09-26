@@ -1,6 +1,6 @@
 [project]
 name = "halter"
-version = "0.1.1"
+version = "0.1.2"
 description = "Audits a change to a Python tree (its tests, changed-line coverage, lint, dead code, public deletions, a red-phase proof and a mutation run) and exits 0 accept, 1 refuse, 2 could not audit, 3 nothing to audit."
 readme = "README.md"
 requires-python = ">=3.12"

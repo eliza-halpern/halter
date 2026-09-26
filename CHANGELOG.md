@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2 (draft, unreleased)
+## 0.1.2 (2026-09-26)
 
 Brings `halter --tiered` to parity with `saddle audit --tiered` as of saddle
 phase2-check 4a4b60d. The default mode (no `--tiered`) gives the same
@@ -28,6 +28,16 @@ verdict, report and JSON as 0.1.1.
 - **No contract change:** `audit.py`'s staging and check conversion are
   split into `staged_copy`, `baseline_tree` and `audit_checks`, shared by
   both modes.
+- **Credits (metadata only; no contract change):** package metadata,
+  README and a new CITATION.cff name the authors as Eliza Halpern and
+  Eryn Lipkowitz.
+- **Tests (no contract change):** 124 direct unit tests of the 13 gate
+  predicates in `halter.gates` (`check_*`), ported from saddle's
+  `tests/test_gates.py` at phase2-check 4a4b60d, with the five diff and
+  text fixtures they read. Each gate now has at least one known-good
+  instance that passes and one known-bad instance that fails. The 24
+  tests of saddle's planner checks, which halter does not ship, and 16
+  tests that exercise only `run_tier1` or other helpers are not ported.
 
 Not in this release (waiting on saddle's in-progress change to tier 2's
 mutation verdict): a survivor shortlist on the mutation finding, per-survivor
