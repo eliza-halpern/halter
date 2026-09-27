@@ -23,7 +23,7 @@ unchanged.
 ## 0.1.2 (2026-09-26)
 
 Brings `halter --tiered` to parity with `saddle audit --tiered` as of saddle
-phase2-check 4a4b60d. The default mode (no `--tiered`) gives the same
+4a4b60d. The default mode (no `--tiered`) gives the same
 verdict, report and JSON as 0.1.1.
 
 - **New:** `--tiered` runs the checks as tier 0 (per changed file: syntax,
@@ -53,7 +53,7 @@ verdict, report and JSON as 0.1.1.
   Eryn Lipkowitz.
 - **Tests (no contract change):** 124 direct unit tests of the 13 gate
   predicates in `halter.gates` (`check_*`), ported from saddle's
-  `tests/test_gates.py` at phase2-check 4a4b60d, with the five diff and
+  `tests/test_gates.py` at saddle 4a4b60d, with the five diff and
   text fixtures they read. Each gate now has at least one known-good
   instance that passes and one known-bad instance that fails. The 24
   tests of saddle's planner checks, which halter does not ship, and 16

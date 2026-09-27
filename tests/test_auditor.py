@@ -1,6 +1,6 @@
 """Tests for halter.auditor: the tiered battery and its tree-keyed cache.
 
-Ported from saddle's tests/test_auditor.py (phase2-check 4a4b60d); the two
+Ported from saddle's tests/test_auditor.py (at 4a4b60d); the two
 saddle tests of options `halter --tiered` never sets (a journal, a declared
 plan node) are replaced by `test_without_a_declaration_scope_checks_are_not_applicable`.
 Fixtures follow test_audit.py: the changed source line is `    return 2`, which

@@ -38,7 +38,7 @@ from halter.gates import (
     compelled_lines,
 )
 
-# Every tool name the global allowlist carries (T3-4). A node listing all
+# Every tool name the global allowlist carries. A node listing all
 # four behaves exactly as it did before each name was bound to a harness
 # behaviour, so this is the fixtures' known-good default; a test that pins
 # one binding passes a shorter list.
@@ -112,9 +112,9 @@ def _finding(
 
 
 def test_ruff_introduced_finding_fails_and_is_named() -> None:
-    """T6-3 known-bad: a finding the baseline did not carry fails the node,
-    and the detail names rule, file and line (F21.13d: `ruff check exited
-    1` told the worker nothing)."""
+    """Known-bad: a finding the baseline did not carry fails the node,
+    and the detail names rule, file and line (in an internal benchmark run,
+    `ruff check exited 1` told the worker nothing)."""
     check = check_ruff(["n.py"], introduced=[_finding()], inherited=0, lint_exit=1, format_exit=0)
     assert check.passed is False
     assert check.name == "ruff"
@@ -122,7 +122,7 @@ def test_ruff_introduced_finding_fails_and_is_named() -> None:
 
 
 def test_ruff_inherited_finding_is_reported_and_does_not_fail() -> None:
-    """T6-3 known-good: a finding the baseline already carried is inherited;
+    """Known-good: a finding the baseline already carried is inherited;
     the node passes with it counted in the detail."""
     check = check_ruff(["n.py"], introduced=[], inherited=1, lint_exit=1, format_exit=0)
     assert check.passed is True
@@ -213,11 +213,11 @@ def test_coverage_full_cover_and_empty_diff_pass() -> None:
 
 
 def test_coverage_detail_names_the_lines_and_carries_no_ratio() -> None:
-    """T6-44: `detail` is routed to the worker, so it states behaviour.
+    """`detail` is routed to the worker, so it states behaviour.
 
     Known-bad: `0.0% < 100.0%: uncovered node.py:3` reaching the worker.
     A percentage is satisfiable by a call that runs the line and asserts
-    nothing, which is what round 3e's n2 attempt 1 wrote sixty times.
+    nothing, which is what one benchmark attempt wrote sixty times.
     The lines are the evidence; the ratio is a number to optimise. The
     ratio stays in `basis`, which is sealed and not worker-facing.
     """
@@ -239,10 +239,10 @@ def test_coverage_detail_names_the_lines_and_carries_no_ratio() -> None:
 
 
 def test_mutation_detail_keeps_its_ratio_on_purpose() -> None:
-    """T6-44 scope: the known-bad this item deliberately still admits.
+    """Scope: the known-bad this change deliberately still admits.
 
     Coverage is satisfiable by a no-op and its ratio is removed. Mutation
-    is not -- a `pass` body admits no mutant -- and round 3d's n2 went
+    is not -- a `pass` body admits no mutant -- and one benchmark node went
     75.3% -> 78.3% by writing real tests against this very string. If a
     draw is ever seen inflating mutation score with mutable-but-
     meaningless lines, this assertion is the one that must change.
@@ -255,7 +255,7 @@ def test_mutation_detail_keeps_its_ratio_on_purpose() -> None:
 
 
 def test_coverage_partial_percent_compared_to_minimum() -> None:
-    """The ratio still decides the verdict; T6-44 only took it out of `detail`.
+    """The ratio still decides the verdict; it was only taken out of `detail`.
 
     This used to assert the prefix `66.7% < 67.0%`, which pinned the
     wording rather than the comparison. Two thirds covered now has to
@@ -291,9 +291,9 @@ def _red(
     # Callers that predate the kind split describe themselves by whether
     # the node touched tests; a refactor is the no-test-change case. The
     # differential (fail pre-change, pass post-change) is the impl node's
-    # path: a test node is a red specification with no baseline leg
-    # (T3-7a), and these fixtures used to name it "test" because nothing
-    # had yet tried to run one (T3-7).
+    # path: a test node is a red specification with no baseline leg,
+    # and these fixtures used to name it "test" because nothing had yet
+    # tried to run one.
     kind = kind or ("impl" if tests_changed else "refactor")
     return check_red_phase(
         (baseline,) * RED_PHASE_SAMPLES,
@@ -388,7 +388,7 @@ def test_binding_all_bound_passes() -> None:
     assert check.detail == "1 requirement(s) bound"
 
 
-# --- T3-24: the orphan half subtracts the ids the rest of the plan declares --
+# --- the orphan half subtracts the ids the rest of the plan declares --------
 
 
 def test_binding_citation_of_another_planned_id_is_not_an_orphan() -> None:
@@ -452,13 +452,13 @@ def test_mutation_boundary_threshold_passes() -> None:
     assert check.name == "mutation"
     assert check.passed is True
     assert check.detail == "killed 17 of 20 changed-line mutants (85.0% >= 85.0%)"
-    # T2-4: the verdict carries its evidence basis, so a reader can tell a
+    # The verdict carries its evidence basis, so a reader can tell a
     # pass over 20 mutants from a pass over 0 without parsing the detail.
     assert check.basis == "sampled n=20"
 
 
 def test_mutation_fail_detail_states_the_denominator() -> None:
-    """T6-97 (WORKPLAN, key pair 1). F21.70 had to rebuild n=29 by
+    """Key pair 1. An internal benchmark analysis had to rebuild n=29 by
     arithmetic from `82.8% < 85.0%: survived 5: ...` because the detail
     never printed how many mutants were decided; the count precedes the
     percentage so the worker's next attempt sees both."""
@@ -473,7 +473,7 @@ def test_mutation_fail_detail_states_the_denominator() -> None:
 
 
 def test_mutation_pass_detail_states_the_denominator() -> None:
-    """T6-97 (WORKPLAN, key pair 2): the pass detail also names both
+    """Key pair 2: the pass detail also names both
     counts, not just the percentage over the total."""
     outcome = MutationOutcome(killed=9, total=10, generated=10, survivors=("s1",))
     check = check_mutation(outcome, 85.0)
@@ -484,8 +484,8 @@ def test_mutation_pass_detail_states_the_denominator() -> None:
 def test_mutation_no_longer_passes_without_mutants() -> None:
     """Was `test_mutation_vacuous_passes_without_mutants`, asserting
     `passed is True` on an empty sample. The name said vacuous and the
-    assertion pinned it; T7 shipped an infinite loop through this branch
-    (F12). Inverted rather than deleted so the history stays legible."""
+    assertion pinned it; a benchmark task shipped an infinite loop through
+    this branch. Inverted rather than deleted so the history stays legible."""
     check = check_mutation(MutationOutcome(killed=0, total=0, generated=0, survivors=()), 85.0)
     assert check.name == "mutation"
     assert check.passed is False
@@ -640,7 +640,8 @@ def test_requirement_binding_rejects_ids_the_node_never_declared() -> None:
     traceSDD's orphan rule: every ID cited in code is a verifiable claim,
     and one absent from the spec is automatically detectable. Without it
     the binding gate is satisfiable in both directions -- the worker can
-    tag whatever it likes, and F5's circularity survives the statements.
+    tag whatever it likes, and the one-author circularity survives the
+    statements.
     """
     check = check_requirement_binding(
         ["REQ-001"],
@@ -652,7 +653,7 @@ def test_requirement_binding_rejects_ids_the_node_never_declared() -> None:
 
 
 def test_requirement_binding_needs_every_example_asserted_on() -> None:
-    """T6-4: a cited id is not a tested example. Known-bad is T1's shape:
+    """A cited id is not a tested example. Known-bad is a benchmark task's shape:
     the tests cite REQ-001 and probe no reject; the detail names each
     example nothing asserts on. Known-good asserts on both, one as a
     string in an `assert`, one in a `parametrize` table, one under
@@ -695,12 +696,12 @@ def test_requirement_binding_needs_every_example_asserted_on() -> None:
 
 
 def test_requirement_binding_binds_a_call_example_to_the_test_that_performs_it() -> None:
-    """T6-50, from round 3f (F21.20): the planner writes examples as calls
+    """From an internal benchmark run: the planner writes examples as calls
     -- `deposit('10.00', 'USD')` -- and `_asserted_literals` collects
     constants, so under the literal rule alone no behavioural test could
-    ever satisfy one. Round 3f died on exactly this: both `n1` and its
+    ever satisfy one. That run died on exactly this: a node and its
     replacement failed all three attempts on `requirement-binding` and
-    nothing else, and the tree of `refs/halter/attempt/n1/3` calls
+    nothing else, and the tree of the last attempt calls
     `deposit`, asserts `10.00`, `USD` and `USX`, and was rejected anyway.
 
     Known-good: the test that performs the operation and asserts on the
@@ -744,7 +745,7 @@ def test_requirement_binding_binds_a_call_example_to_the_test_that_performs_it()
 
 
 def test_requirement_binding_refuses_a_call_example_that_is_quoted_not_performed() -> None:
-    """The tightening half of T6-50. The literal rule's one satisfying
+    """The tightening half of the call rule. The literal rule's one satisfying
     source was a test that quotes the example and asserts nothing about
     the behaviour -- the shape the whole project exists to reject -- so
     closing it is the point, not a side effect.
@@ -786,14 +787,14 @@ def test_requirement_binding_refuses_a_call_example_that_is_quoted_not_performed
 
 
 def test_requirement_binding_binds_a_call_the_test_assigns_before_asserting() -> None:
-    """Round 3j (F21.41): the binding proxy asked whether the example's
+    """From an internal benchmark run: the binding proxy asked whether the example's
     constants appear inside an `assert`, which is not where a Python test
     puts the arguments of the call it is exercising. A reject is written
     `with pytest.raises(...): deposit("0.001", "USD")` -- a `With`, which
     `_asserted_literals` collects -- and an accept is written
     `result = deposit("1.001", "USD")` then `assert result == ...`, an
     `Assign`, which nothing collects. So the gate bound every reject and
-    missed every accept: six attempts of round 3j, accepts 3 unbound and
+    missed every accept: six attempts in that run, accepts 3 unbound and
     rejects 1 unbound, every time, with no variance at all.
 
     The proxy is replaced by the thing it stood for: a test must CALL the
@@ -847,7 +848,7 @@ def test_requirement_binding_binds_a_call_the_test_assigns_before_asserting() ->
 
 def test_requirement_binding_keeps_the_literal_rule_for_what_is_not_a_call() -> None:
     """The call rule applies to examples that parse as a call and to
-    nothing else, so T6-4's literal examples are untouched. A call the
+    nothing else, so the literal examples are untouched. A call the
     gate cannot name -- the callee is itself an expression -- falls back
     with them, and a call in a function that is not a test does not count
     as performing anything."""
@@ -880,14 +881,14 @@ def test_requirement_binding_keeps_the_literal_rule_for_what_is_not_a_call() -> 
 
 
 def test_requirement_binding_binds_a_data_example_to_the_values_inside_it() -> None:
-    """Round 3j (F21.41): an example written as structured data -- the
+    """From an internal benchmark run: an example written as structured data -- the
     planner's version-2 store record -- fell to the literal rule, which
     binds only a test quoting the whole blob as one string. That inverted
     the gate: the suite that saved a ledger and asserted the written JSON
     equals the record was REFUSED, and a test that quoted the text and
     asserted nothing about behaviour PASSED. Four attempts across two
     nodes died on it with a byte-identical detail and no suite could have
-    passed, because the shape T6-50 repaired was the call branch only.
+    passed, because the earlier repair covered the call branch only.
 
     So a data example binds the way a call example does: by the constants
     inside it, spelled as `_asserted_literals` spells them. The accept and
@@ -915,7 +916,7 @@ def test_requirement_binding_binds_a_data_example_to_the_values_inside_it() -> N
     )
     assert check.passed is False
     assert check.detail.endswith("(no test asserts on '3')")
-    # The known-bad this admits, exhibited (WORKPLAN 0.6): the values may
+    # The known-bad this admits, exhibited: the values may
     # be asserted without the behaviour being exercised. The flat-literal
     # rule already admitted the same shape -- quoting the blob verbatim --
     # so this widens what counts as bound, never what counts as tested.
@@ -964,7 +965,7 @@ def test_requirement_binding_passes_when_every_cited_id_is_declared() -> None:
 def test_mutation_zero_mutants_no_longer_passes() -> None:
     """Zero mutants is zero evidence, not a clean bill of health.
 
-    F12: T7's node added a 218-line module, produced no changed-line
+    In an internal benchmark run, a node added a 218-line module, produced no changed-line
     mutants, and the gate reported `PASS (no mutants on changed lines)`
     having tested nothing. An infinite loop shipped past it. The
     fail-open was deliberate -- a change with no mutable surface cannot
@@ -981,7 +982,7 @@ def test_mutation_zero_mutants_no_longer_passes() -> None:
 def test_mutation_small_sample_demands_every_mutant() -> None:
     """A percentage over a tiny sample is noise, so take no partial credit.
 
-    F1: T1's four-line regex admitted 2 mutants, two shallow tests killed
+    In an internal benchmark run, a four-line regex admitted 2 mutants, two shallow tests killed
     both, and the gate read 100%. The validator still accepted
     `.u@example.com` and `user@example..com`. The threshold cannot fix
     that, but it can refuse to call 3-of-4 adequate.
@@ -1002,11 +1003,11 @@ def test_mutation_detail_always_reports_the_sample_size() -> None:
 
 
 def test_impl_node_may_not_touch_test_files() -> None:
-    """The circularity is one worker authoring both sides (F5, #44).
+    """The circularity is one worker authoring both sides.
 
     Zylos: when one model writes the implementation and the tests, "a
     misreading of the contract doesn't get an independent second look; it
-    gets encoded twice". T4's worker fixed the wrong module and rewrote
+    gets encoded twice". In a benchmark task the worker fixed the wrong module and rewrote
     the behaviour-pinning test to match; all seven gates passed. An impl
     node that cannot edit tests cannot do that.
     """
@@ -1041,7 +1042,7 @@ def test_refactor_node_may_touch_both() -> None:
 
 
 def test_refactor_node_may_not_create_a_file() -> None:
-    """#65: a node picks `refactor` to dodge the impl/test split entirely.
+    """A node picks `refactor` to dodge the impl/test split entirely.
 
     Editing both sides is the exemption's whole point, but creating a file
     is not editing -- it is the split done under the exempt name.
@@ -1054,11 +1055,11 @@ def test_refactor_node_may_not_create_a_file() -> None:
 
 
 def test_a_node_without_write_file_may_not_create_a_file() -> None:
-    """T3-4 known-bad: `write_file` is the binding that governs creation.
+    """Known-bad: `write_file` is the binding that governs creation.
 
     `allowed_tools` was validated against the global allowlist and then
     consumed by nothing, so withholding `write_file` changed nothing about
-    what the node could do. The refactor ban (#65) covered one kind; this
+    what the node could do. The refactor ban covered one kind; this
     covers every kind, and it names the tool so the worker can read why.
     """
     check = check_node_scope("refactor", ["n.py"], ["new.py"], may_create=False)
@@ -1077,7 +1078,7 @@ def test_an_impl_node_without_write_file_may_not_create_a_file() -> None:
 
 
 def test_a_node_without_write_file_that_creates_nothing_still_passes() -> None:
-    """T3-4 known-good: the binding governs creation, not editing. A node
+    """Known-good: the binding governs creation, not editing. A node
     that only changes files it already had loses nothing by omitting
     `write_file`, which is what makes the name a choice rather than a
     formality."""
@@ -1094,7 +1095,7 @@ def test_target_files_empty_is_unrestricted() -> None:
 
 
 def test_target_files_within_list_passes() -> None:
-    """Known-good (T3-2): every touched file is named, so the node stays
+    """Known-good: every touched file is named, so the node stays
     inside the scope it declared."""
     check = check_target_files(["n.py", "tests/test_n.py"], ["n.py"])
     assert check.passed is True
@@ -1102,7 +1103,7 @@ def test_target_files_within_list_passes() -> None:
 
 
 def test_target_files_outside_list_fails_and_names_the_stray() -> None:
-    """Known-bad (T3-2, #64): T4's worker fixed the wrong module; a node
+    """Known-bad: in a benchmark task the worker fixed the wrong module; a node
     that had named its module would have been stopped here."""
     check = check_target_files(["orders.py"], ["orders.py", "discounts.py", "new_module.py"])
     assert check.passed is False
@@ -1146,7 +1147,7 @@ def test_refactor_node_still_takes_the_behaviour_preserving_branch() -> None:
 
 def test_test_node_must_contribute_a_property() -> None:
     """Two happy-path examples over an unbounded domain is the predicted
-    output, not an anomaly (F1). T1 shipped a regex accepting
+    output, not an anomaly. A benchmark task shipped a regex accepting
     `.u@example.com` and `user@example..com` with 7/7 gates green,
     because its two tests probed neither.
     """
@@ -1172,11 +1173,11 @@ T1_PROPERTY: Final = (
 
 def test_hypothesis_given_counts_as_a_property() -> None:
     """A `@given` property is a property (presence), and at least one of
-    them must reject an input (polarity, T6-5).
+    them must reject an input (polarity).
 
-    Known-bad is T1's own shape: one property, positive, over a regex of
+    Known-bad is that benchmark task's own shape: one property, positive, over a regex of
     valid addresses. A validator that returns True for everything
-    satisfies it, and F1's did for `.u@example.com`. Known-good adds a
+    satisfies it, and the shipped one did for `.u@example.com`. Known-good adds a
     property over near-misses that asserts the rejection.
     """
     positive_only = {"tests/test_v.py": T1_PROPERTY}
@@ -1237,7 +1238,7 @@ def test_property_polarity_ignores_rejections_outside_a_property() -> None:
 
 
 def test_property_oracle_binds_the_impl_node(monkeypatch: pytest.MonkeyPatch) -> None:
-    """T3-3: the property alone must kill a sampled mutant of the impl node.
+    """The property alone must kill a sampled mutant of the impl node.
 
     Known-good: a kill by the property modules passes with the basis. No
     targets: not required. Known-bad: zero kills names the count and the
@@ -1253,7 +1254,7 @@ def test_property_oracle_binds_the_impl_node(monkeypatch: pytest.MonkeyPatch) ->
     untargeted = check_property_coverage("impl", {}, targets=())
     assert untargeted.passed is True
     assert untargeted.detail == "not required: no property targets this change"
-    # A pass that judged nothing says so (F21.64 recommendation 69): the
+    # A pass that judged nothing says so: the
     # basis was None here, and a reader could not tell this apart from a
     # pass an oracle actually earned.
     assert untargeted.basis == "oracle: not run, no property module names a changed file"
@@ -1318,7 +1319,7 @@ def test_property_detection_handles_unparseable_and_bare_decorators() -> None:
 def test_parametrize_is_examples_not_a_property() -> None:
     """`@pytest.mark.parametrize` is a table of cases the author chose.
 
-    That is precisely what F1 shows is insufficient -- the cases probed
+    That is precisely what the regex task shows is insufficient -- the cases probed
     are the cases already in mind. Only generated inputs count.
     """
     table_only = {
@@ -1335,9 +1336,9 @@ def test_parametrize_is_examples_not_a_property() -> None:
 
 
 def test_refactor_may_not_rewrite_an_existing_assertion() -> None:
-    """T4: the worker fixed the wrong module and rewrote the
+    """In a benchmark task the worker fixed the wrong module and rewrote the
     behaviour-pinning test to match -- 3.03 became 3.02 -- and all seven
-    gates passed. #57 stops an impl node touching tests at all, but a
+    gates passed. Node scope stops an impl node touching tests at all, but a
     refactor may move code and tests together, and "behaviour-preserving"
     means the assertions survive the move.
     """
@@ -1360,7 +1361,7 @@ def test_adding_assertions_to_an_existing_test_is_allowed() -> None:
 
 
 def test_test_nodes_may_rewrite_assertions() -> None:
-    """Repairing stale assertions is a test node's job (T2), and #57
+    """Repairing stale assertions is a test node's job, and node scope
     stops it shipping the implementation alongside."""
     baseline = {"tests/t.py": "def test_total():  # REQ-001\n    assert total() == 3.03\n"}
     current = {"tests/t.py": "def test_total():  # REQ-001\n    assert total() == 3.02\n"}
@@ -1410,7 +1411,7 @@ def test_same_test_name_in_two_modules_keeps_both_contracts() -> None:
     assert "test_total" in check.detail
 
 
-# --- T3-7a: a `test` node is a red specification ---------------------------
+# --- a `test` node is a red specification ----------------------------------
 
 SPEC_SOURCE: Final = (
     "from hypothesis import given\n"
@@ -1445,7 +1446,7 @@ def _spec_inputs(exit_code: int, output: str) -> Tier1Inputs:
 
 
 def test_tests_spec_node_passes_on_a_red_run() -> None:
-    """T3-7a known-good: a test node's suite must fail now."""
+    """Known-good: a test node's suite must fail now."""
     check = check_test_command(
         "pytest test_n.py",
         lambda _cmd: PYTEST_TESTS_FAILED,
@@ -1553,7 +1554,7 @@ def test_red_phase_spec_node_mirrors_the_tests_verdict() -> None:
 
 
 def test_mutation_failed_tool_is_named_not_undecided() -> None:
-    """T3-20: a tool that never ran renders as a tool failure (known-bad),
+    """A tool that never ran renders as a tool failure (known-bad),
     while a run that decided nothing keeps its wording (known-good)."""
     failed = MutationOutcome(
         killed=0, total=0, generated=0, survivors=("mutmut run exited 1: boom",)
@@ -1567,10 +1568,10 @@ def test_mutation_failed_tool_is_named_not_undecided() -> None:
 
 
 def test_mutation_red_suite_is_named_not_blamed_on_the_tool() -> None:
-    """T6-63. Known-bad: mutmut exited non-zero because the node's own
+    """Known-bad: mutmut exited non-zero because the node's own
     suite is red, so the detail names the suite -- the worker can act on
     that and cannot act on "the tool failed". Known-good: a genuine tool
-    failure keeps T3-20's wording, and an undecided run keeps its own.
+    failure keeps the tool-failure wording, and an undecided run keeps its own.
     """
     tool = "mutmut run exited 1: failed to collect stats. runner returned 1"
     red = MutationOutcome(killed=0, total=0, generated=0, survivors=(f"suite is red: {tool}",))
@@ -1583,7 +1584,7 @@ def test_mutation_red_suite_is_named_not_blamed_on_the_tool() -> None:
 
 
 def test_mutation_detail_reports_the_text_only_mutants_left_out() -> None:
-    """T6-33: the verdict says how many mutants were excluded as text-only,
+    """The verdict says how many mutants were excluded as text-only,
     on a pass and on a fail, and the survivor count precedes the names."""
     passing = MutationOutcome(killed=9, total=10, generated=10, survivors=("s1",), text_only=4)
     check = check_mutation(passing, 85.0)
@@ -1608,7 +1609,7 @@ def test_mutation_detail_reports_the_text_only_mutants_left_out() -> None:
 
 
 def test_mutation_detail_names_the_untested_mutants_only_on_a_fail() -> None:
-    """P0-3 gate-level pair (M-B5): a failing outcome with `untested > 0`
+    """Gate-level pair: a failing outcome with `untested > 0`
     appends the count and the reason; the same outcome with `untested ==
     0` renders today's exact string, byte-identical, so the existing
     detail tests above stay pinned unmodified."""
@@ -1633,7 +1634,7 @@ def test_mutation_detail_names_the_untested_mutants_only_on_a_fail() -> None:
     assert "untested" not in check_mutation(passing_but_untested, 85.0).detail
 
 
-# --- T6-29c: the verdict carries the gap it found ---------------------------
+# --- the verdict carries the gap it found ----------------------------------
 
 
 FIXTURES: Final = Path(__file__).parent / "fixtures"
@@ -1666,7 +1667,7 @@ def _baseline(diff: str, path: str) -> str:
     """`path` as it stood before `diff`, from that same whole-file hunk.
 
     The fixtures carry full context, so the `-` and context lines are the
-    original file. T6-42 compares what was defined before against what is
+    original file. The public-deletions check compares what was defined before against what is
     defined after, so it needs both sides of one diff.
     """
     lines = diff.splitlines(keepends=True)
@@ -1694,7 +1695,7 @@ def _fixture_tree(name: str) -> tuple[dict[str, str], dict[str, set[int]]]:
 
 
 def test_dead_additions_rejects_the_round3e_repeated_block() -> None:
-    """The real artifact: nine of eleven gates passed it (F21.16 §1).
+    """The real artifact: nine of eleven gates passed it in an internal benchmark run.
 
     `fees.py` grew from 41 lines to 1337 by repeating one 21-line block,
     and mutation still read 88.8% over 80 mutants because a `pass` body
@@ -1743,9 +1744,9 @@ def test_dead_additions_accepts_the_same_draw_without_the_repeated_block() -> No
 
 
 def _padded_tree(count: int = 50) -> tuple[dict[str, str], dict[str, set[int]]]:
-    """Round 3h's shape: many helpers named once each, beside real work.
+    """A benchmark draw's shape: many helpers named once each, beside real work.
 
-    The frozen round-3e draw repeats twenty names; this one repeats none.
+    The frozen degenerate draw repeats twenty names; this one repeats none.
     """
     real = (
         "def fee_for(amount):\n    return _coerce(amount)\n\n\n"
@@ -1764,10 +1765,10 @@ def _padded_tree(count: int = 50) -> tuple[dict[str, str], dict[str, set[int]]]:
 def test_dead_additions_rejects_many_distinct_names_used_once() -> None:
     """The other degeneration shape: no name repeats and all are dead.
 
-    Round 3e's frozen draw emits twenty names, three of them sixty times,
-    so a check counting repeats would reject it. Round 3h's `n2` attempt 1
-    draw 2 emits 192 definitions with 192 distinct names, 187 mentioned
-    nowhere but their own `def` line (F21.30), and a repeat count would
+    The frozen degenerate draw emits twenty names, three of them sixty times,
+    so a check counting repeats would reject it. Another benchmark draw
+    emits 192 definitions with 192 distinct names, 187 mentioned
+    nowhere but their own `def` line, and a repeat count would
     read it as clean. This gate asks whether anything depends on the
     definition, so both shapes land the same way; that is what this pins.
     The basis counts every dead name, so an implementation that
@@ -1918,7 +1919,7 @@ def test_dead_additions_reads_mentions_past_a_module_that_does_not_parse() -> No
 
 def test_dead_additions_ignores_a_public_definition_no_test_names_yet() -> None:
     """A public name is the module's surface, and the node that writes the
-    tests naming it may not have run: round 3e's `fee_for` is new, public,
+    tests naming it may not have run: the fixture draw's `fee_for` is new, public,
     and mentioned nowhere in the tree it was gated in."""
     sources = {"fees.py": "def fee_for(amount):\n    return 1\n", "t.py": "x = 1\n"}
     check = check_dead_additions(
@@ -1929,13 +1930,13 @@ def test_dead_additions_ignores_a_public_definition_no_test_names_yet() -> None:
 
 
 def test_public_deletions_rejects_the_round3d_repair_that_deleted_the_api() -> None:
-    """The real artifact: n2's repair sealed by removing what it could not fix.
+    """The real artifact: a node's repair sealed by removing what it could not fix.
 
     The node was handed a failing `Account.to_dict` and deleted `to_dict`,
     `from_dict`, `__eq__` and `__repr__` rather than repair them. Every
     gate passed, because the tree it left behind calls none of them and
     the suite it ran was the tree's own. Recovered from the run's dangling
-    blobs; no attempt snapshot existed to read it from (T6-34).
+    blobs; no attempt snapshot existed to read it from.
     """
     diff = (FIXTURES / "repair_deletes_public_round3d.diff").read_text()
     before = _baseline(diff, "accounts.py")
@@ -1955,11 +1956,12 @@ def test_public_deletions_rejects_the_round3d_repair_that_deleted_the_api() -> N
 def test_public_deletions_accepts_a_whole_file_rewrite_of_the_same_methods(name: str) -> None:
     """The discriminating half: a rewrite is not a deletion.
 
-    Both round-3e draws rewrite `accounts.py` end to end, so each of those
+    Both fixture draws rewrite `accounts.py` end to end, so each of those
     four methods appears as a `-` line and again as a `+` line. A check
     reading the diff would reject them; this one reads the tree the node
-    left and passes. The degenerate draw is here on purpose: T6-41 is what
-    rejects its repeated block, and T6-42 must not double as that gate.
+    left and passes. The degenerate draw is here on purpose: dead-code is
+    what rejects its repeated block, and public-deletions must not double
+    as that gate.
     """
     diff = (FIXTURES / name).read_text()
     paths = ("money.py", "accounts.py", "fees.py")
@@ -1990,7 +1992,7 @@ def test_public_deletions_ignores_the_methods_of_a_private_class() -> None:
 def test_public_deletions_counts_a_dunder_as_public() -> None:
     """`__eq__` reads private by prefix and is the caller-facing contract.
 
-    Three of round 3d's four deletions were dunders, so a rule keyed on
+    Three of the artifact's four deletions were dunders, so a rule keyed on
     the leading underscore alone would have admitted the artifact this
     gate exists to reject.
     """
@@ -2050,8 +2052,8 @@ def test_public_deletions_accepts_an_async_definition_kept() -> None:
     assert gone.detail.startswith("m.py no longer defines fetch;")
 
 
-# The eleven lines round 3g's coverage gate named on `n2.r1` attempt 1 --
-# the tree that passes 16 of 16 hidden accounts-and-fees tests (F21.21).
+# The eleven lines the coverage gate named on one benchmark attempt --
+# the tree that passes 16 of 16 hidden accounts-and-fees tests.
 _ROUND3G_UNCOVERED: Final = (
     ("accounts.py", 27),
     ("accounts.py", 97),
@@ -2069,9 +2071,9 @@ _ROUND3G_COVERED: Final = tuple(("accounts.py", n) for n in range(200, 255))
 
 
 def test_coverage_defers_round3g_lines_while_a_test_node_is_owed() -> None:
-    """Known-good (T6-53): the artifact ground truth accepts, accepted.
+    """Known-good: the artifact ground truth accepts, accepted.
 
-    `n2.r1` had to rewrite `Account.to_dict` because REQ-002 replaces the
+    The impl node had to rewrite `Account.to_dict` because REQ-002 replaces the
     scalar balance with a per-currency map, but the record shape it
     writes is REQ-004's -- the task prompt's section 7, `store.py` -- and
     the only file that can exercise it, `tests/test_store.py`, belongs to
@@ -2088,7 +2090,7 @@ def test_coverage_defers_round3g_lines_while_a_test_node_is_owed() -> None:
 def test_coverage_still_fails_the_same_lines_with_no_test_node_owed() -> None:
     """The discriminating half: deferral is a schedule, not an exemption.
 
-    Identical inputs, empty `owed`. If this passed, T6-53 would have
+    Identical inputs, empty `owed`. If this passed, deferral would have
     turned the coverage gate off rather than moved when it asks.
     """
     changed = {*_ROUND3G_UNCOVERED, *_ROUND3G_COVERED}
@@ -2099,12 +2101,12 @@ def test_coverage_still_fails_the_same_lines_with_no_test_node_owed() -> None:
 
 
 def test_coverage_deferral_admits_a_node_that_adds_code_nothing_runs() -> None:
-    """What T6-53 admits, exhibited rather than described (WORKPLAN 0.6).
+    """What deferral admits, exhibited rather than described.
 
     This is the known-bad the rule now lets through: a node adds a
     private helper no test reaches, and while any test node is owed it
     seals. The alternative was failing the run at drain, which fails on
-    the arm's own suite while the hidden suite that decides the task is a
+    the run's own suite while the hidden suite that decides the task is a
     different one -- so it would fail runs whose artifact is correct.
     The admission is bounded by the half above: once nothing is owed, the
     same line fails.
@@ -2133,7 +2135,7 @@ def _g1_sources() -> tuple[dict[str, str], dict[str, str]]:
 
 
 def test_coverage_passes_the_draw_it_failed_when_only_compelled_lines_are_uncovered() -> None:
-    """Known-good: the artifact three attempts could not get past (T6-75).
+    """Known-good: the artifact three attempts could not get past.
 
     Attempt 3 wrote correct multi-currency code -- its own gate command
     was green at 29 passed and mutation read 92.3% -- and coverage failed

@@ -277,7 +277,7 @@ def test_audit_rev_mode_accepts_a_relative_repo(
     assert out.getvalue().rstrip().endswith("verdict: accept")
 
 
-# --- --tiered (ported from saddle tests/test_auditor.py, phase2-check 4a4b60d) ---
+# --- --tiered (ported from saddle tests/test_auditor.py at 4a4b60d) ---
 
 
 def _tiered(repo: Path, *extra: str) -> tuple[int, str, str]:

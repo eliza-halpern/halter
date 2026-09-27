@@ -346,7 +346,7 @@ def test_one_byte_of_source_is_a_miss(clean_tree: Path, tmp_path: Path) -> None:
 def test_a_different_gate_surface_is_a_miss(
     clean_tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Pair 3: a different gate surface is a miss (M-K1)."""
+    """Pair 3: a different gate surface is a miss."""
     cache = tmp_path / "cache"
     audit_tree(clean_tree, cache=cache)
     monkeypatch.setattr(audit, "gate_surface", lambda *a, **kw: "other")
@@ -355,7 +355,7 @@ def test_a_different_gate_surface_is_a_miss(
 
 
 def test_a_different_test_command_is_a_miss(clean_tree: Path, tmp_path: Path) -> None:
-    """Pair 4: a different test command is a miss (M-K2)."""
+    """Pair 4: a different test command is a miss."""
     cache = tmp_path / "cache"
     audit_tree(clean_tree, cache=cache)
     result = audit_tree(clean_tree, cache=cache, test_command="python -m pytest -q test_n.py")
@@ -363,7 +363,7 @@ def test_a_different_test_command_is_a_miss(clean_tree: Path, tmp_path: Path) ->
 
 
 def test_a_planted_verdict_is_not_served(untracked_module_tree: Path, tmp_path: Path) -> None:
-    """Pair 5: a planted verdict, filed under a tampered key, is not served (M-K3)."""
+    """Pair 5: a planted verdict, filed under a tampered key, is not served."""
     cache = tmp_path / "cache"
     first = audit_tree(untracked_module_tree, cache=cache)
     assert first.verdict == "refuse"
@@ -379,7 +379,7 @@ def test_a_planted_verdict_is_not_served(untracked_module_tree: Path, tmp_path: 
 
 
 def test_garbage_cache_file_is_a_miss_not_a_crash(clean_tree: Path, tmp_path: Path) -> None:
-    """Pair 6: unparseable cache content is a miss, never an exception (M-K4)."""
+    """Pair 6: unparseable cache content is a miss, never an exception."""
     cache = tmp_path / "cache"
     audit_tree(clean_tree, cache=cache)
     _the_only_cache_file(cache).write_bytes(b"{not json")
@@ -389,7 +389,7 @@ def test_garbage_cache_file_is_a_miss_not_a_crash(clean_tree: Path, tmp_path: Pa
 
 
 def test_gate_surface_moves_with_each_input_and_nothing_else(tmp_path: Path) -> None:
-    """Pair 7: `gate_surface` moves with each input and nothing else (M-K5)."""
+    """Pair 7: `gate_surface` moves with each input and nothing else."""
     a = tmp_path / "a.py"
     b = tmp_path / "b.py"
     a.write_text("x = 1\n")
@@ -409,7 +409,7 @@ def test_gate_surface_moves_with_each_input_and_nothing_else(tmp_path: Path) -> 
 
 
 def test_a_tracked_coveragerc_is_not_noise(tmp_path: Path) -> None:
-    """Pair 8 (COPY_IGNORE): a tracked `.coveragerc` is not noise (M-K6).
+    """Pair 8 (COPY_IGNORE): a tracked `.coveragerc` is not noise.
 
     Red at 29dc661: `shutil.ignore_patterns(".coverage*", ...)` also drops
     `.coveragerc`, so the copy loses a tracked file the baseline has and an
@@ -473,7 +473,7 @@ def test_a_git_directory_git_cannot_read_is_an_audit_error(tmp_path: Path) -> No
 
 
 def test_mutants_and_halter_below_top_level_are_real_files(tmp_path: Path) -> None:
-    """Pair 9: `mutants`/`.halter` below the top level are real, tracked files (M-K7)."""
+    """Pair 9: `mutants`/`.halter` below the top level are real, tracked files."""
     tree = tmp_path / "tree"
     _init(
         tree,
@@ -585,7 +585,7 @@ def test_a_basis_that_names_the_copy_is_spelled_from_the_root(tmp_path: Path) ->
     assert mutation is None
 
 
-# ------------------------------- halter H2-3: contract mutants (b) and (c)
+# ---------------------------------------------- contract mutants (b) and (c)
 
 
 def _mutmut_reporting(stub_dir: Path, monkeypatch: pytest.MonkeyPatch, verdicts: str) -> None:
