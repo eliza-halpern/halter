@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-09-26)
 
 Brings `halter` and `halter --tiered` to parity with `saddle audit` and
-`saddle audit --tiered` as of saddle 53a9a45, except `--tier2 shortlist`,
-which is not in this list. Verdicts, text reports and exit codes are
-unchanged.
+`saddle audit --tiered` as of saddle 53a9a45, except the tier-2 survivor
+shortlist (`--tier2 shortlist`), which is not in this release. Verdicts,
+text reports and exit codes are unchanged.
 
 - **Tightened (reporting only):** when coverage spares a changed line
   because it sits in a public definition the baseline had, that no test
@@ -19,6 +19,12 @@ unchanged.
   `--json` report prints it. The check surface hashes the changed
   modules, so verdicts cached by 0.1.2 miss once and are recomputed.
 - **No contract change:** `ruff format` of `audit.py` under ruff 0.16.9.
+- **Docs only (no contract change):** test docstrings and comments no
+  longer cite internal tracking IDs; the reasoning they carried is kept.
+
+Not in this release: the tier-2 survivor shortlist gate (`--tier2
+shortlist`, `--mutant-shortlist`). Tier 2's mutation verdict is decided
+by the kill rate exactly as in 0.1.2.
 
 ## 0.1.2 (2026-09-26)
 
