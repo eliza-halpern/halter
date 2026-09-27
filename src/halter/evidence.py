@@ -22,7 +22,7 @@ import tarfile
 import tempfile
 import tokenize
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path, PurePath
 from time import perf_counter
@@ -437,6 +437,9 @@ def scoped_targets(targets: Collection[str], scope: Collection[str]) -> tuple[st
     return tuple(kept)
 
 
+type MutantDetail = tuple[str, str, str]  # (name, status, mutmut show text)
+
+
 @dataclass(frozen=True)
 class MutationOutcome:
     """Sampled kill-rate evidence over changed-line mutants."""
@@ -465,6 +468,11 @@ class MutationOutcome:
     # maps SIGKILL and SIGSEGV both to "segfault", and can escalate a
     # timeout to it). A mutmut failure (`total == 0`) leaves it empty.
     statuses: tuple[tuple[str, int], ...] = ()
+    mutant_detail: tuple[MutantDetail, ...] = field(default=(), compare=False)
+    """(name, status, mutmut show text) for EVERY scored mutant, killed ones
+    included, in name order; a mutant mutmut never scored (`not checked`) or
+    that is not in `total` has none. Recording only: no verdict reads it, and
+    neither `--json` report prints it (the tiered verdict cache keeps it)."""
 
 
 def _is_given(decorator: ast.expr) -> bool:
@@ -964,6 +972,7 @@ def mutation_sample(
             msg = f"mutant lookup failed: {exc}"
             return MutationOutcome(killed=0, total=0, generated=0, survivors=(msg,))
         scoped: list[tuple[str, str, str, set[int]]] = []
+        shown: dict[str, str] = {}
         undecided = 0
         text_only = 0
         for name in sorted(verdicts):
@@ -1001,6 +1010,7 @@ def mutation_sample(
                 text_only += 1
                 continue
             scoped.append((name, verdict, key, hit))
+            shown[name] = shown_stdout
     sample = scoped
     killed = sum(1 for _, verdict, _, _ in sample if verdict in ("killed", "timeout"))
     # Every not-killed status is a survivor, not only "survived": `no
@@ -1030,6 +1040,7 @@ def mutation_sample(
         survivor_lines=tuple(survivor_lines),
         untested=untested,
         statuses=tuple(sorted(status_tally.items())),
+        mutant_detail=tuple((name, verdict, shown[name]) for name, verdict, _, _ in sample),
     )
 
 

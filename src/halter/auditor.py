@@ -148,6 +148,10 @@ class Findings:
     key: str
     findings: tuple[Finding, ...]
     cached: bool = False
+    mutant_detail: tuple[tuple[str, str, str], ...] = ()
+    """Tier 2 only: (name, status, show) for every scored mutant
+    (`MutationOutcome.mutant_detail`); absent from `to_dict` when empty.
+    Recording only: kept in the verdict cache, left out of `--json`."""
 
     @property
     def passed(self) -> bool:
@@ -160,6 +164,15 @@ class Findings:
             "passed": self.passed,
             "cached": self.cached,
             "findings": [dataclasses.asdict(f) for f in self.findings],
+            **(
+                {
+                    "mutant_detail": [
+                        {"name": n, "status": s, "show": t} for n, s, t in self.mutant_detail
+                    ]
+                }
+                if self.mutant_detail
+                else {}
+            ),
         }
 
     @staticmethod
@@ -170,6 +183,10 @@ class Findings:
             tier=int(str(data["tier"])),
             key=str(data["key"]),
             findings=tuple(Finding(**{**f, "cites": tuple(f["cites"])}) for f in raw),
+            mutant_detail=tuple(
+                (d["name"], d["status"], d["show"])
+                for d in data.get("mutant_detail", ())  # type: ignore[attr-defined]
+            ),
         )
 
 
@@ -340,12 +357,20 @@ class Auditor:
             gated = runner.run_node_gate(self.node, copy, baseline=resolved, tier2=tier == 2)
             checks, _ = audit_checks(gated.checks, gated.mutation, copy)
             statuses = {c.name: (c.status, c.detail, c.basis) for c in checks}
+            scored = gated.mutation.mutant_detail if gated.mutation is not None else ()
         wanted = TIER1 if tier == 1 else TIER2
         findings = []
         for gate in wanted:
             status, detail, basis = statuses["tests" if gate == "full-suite" else gate]
             findings.append(_finding(gate, tier, status, detail, basis))  # type: ignore[arg-type]
-        return self._store(Findings(tier=tier, key=key, findings=tuple(findings)))
+        return self._store(
+            Findings(
+                tier=tier,
+                key=key,
+                findings=tuple(findings),
+                mutant_detail=scored if tier == 2 else (),
+            )
+        )
 
     def tier1(self, tree: Path | None = None) -> Findings:
         """Tier 1 over `tree` (default: the repo's working tree)."""

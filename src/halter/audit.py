@@ -126,7 +126,7 @@ class AuditResult:
             "baseline": self.baseline,
             "test_command": self.test_command,
             "checks": [asdict(check) for check in self.checks],
-            "mutation": asdict(self.mutation) if self.mutation is not None else None,
+            "mutation": _mutation_dict(self.mutation) if self.mutation is not None else None,
             "surface": self.surface,
             "cached": self.cached,
         }
@@ -146,6 +146,14 @@ class AuditResult:
             surface=data["surface"],
             cached=data["cached"],
         )
+
+
+def _mutation_dict(mutation: MutationOutcome) -> dict[str, Any]:
+    """`asdict(mutation)` without `mutant_detail`: the per-mutant record is
+    not part of `halter --json`."""
+    data = asdict(mutation)
+    del data["mutant_detail"]
+    return data
 
 
 def _tuplify(value: Any) -> Any:

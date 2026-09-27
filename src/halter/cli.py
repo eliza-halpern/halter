@@ -127,7 +127,10 @@ def _report_tiered(results: tuple[Findings, ...], as_json: bool, stdout: IO[str]
     """One line per finding, then the verdict; exit as `AUDIT_EXIT_CODES`."""
     verdict = "accept" if all(r.passed for r in results) else "refuse"
     if as_json:
-        payload = {"verdict": verdict, "tiers": [r.to_dict() for r in results]}
+        # mutant_detail is the verdict cache's per-mutant record, not the
+        # report's: left out so `--json` is what it was before it existed.
+        tiers = [{k: v for k, v in r.to_dict().items() if k != "mutant_detail"} for r in results]
+        payload = {"verdict": verdict, "tiers": tiers}
         stdout.write(json.dumps(payload, indent=2) + "\n")
     else:
         for r in results:
