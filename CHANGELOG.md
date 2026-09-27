@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Brings `halter` and `halter --tiered` to parity with `saddle audit` and
+`saddle audit --tiered` as of saddle 53a9a45, except `--tier2 shortlist`,
+which is not in this list. Verdicts, text reports and exit codes are
+unchanged.
+
+- **Tightened (reporting only):** when coverage spares a changed line
+  because it sits in a public definition the baseline had, that no test
+  reaches and the change may not delete, the coverage `basis` now names
+  each such definition, `spared-defs=<file>:<qualified name>,...`, beside
+  the existing `compelled-lines=N`. It appears in `halter --json`
+  (`checks[].basis`) and in the tiered coverage finding's `cites`.
+- **Tightened (recording only):** the tiered verdict cache's tier-2 entry
+  records `mutant_detail`, one `{name, status, show}` row per scored
+  mutant (killed ones included, `mutmut show` text as printed). Neither
+  `--json` report prints it. The check surface hashes the changed
+  modules, so verdicts cached by 0.1.2 miss once and are recomputed.
+- **No contract change:** `ruff format` of `audit.py` under ruff 0.16.9.
+
 ## 0.1.2 (2026-09-26)
 
 Brings `halter --tiered` to parity with `saddle audit --tiered` as of saddle
