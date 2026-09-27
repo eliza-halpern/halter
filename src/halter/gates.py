@@ -399,18 +399,51 @@ def compelled_lines(
     without the prefix the intersection is empty and this exemption
     fires for nothing.
     """
-    reached = set(covered)
     compelled: set[tuple[str, int]] = set()
+    for lines in compelled_definitions(baseline_sources, sources, prefix, covered).values():
+        compelled |= lines
+    return compelled
+
+
+def compelled_definitions(
+    baseline_sources: Mapping[str, str],
+    sources: Mapping[str, str],
+    prefix: str = "",
+    covered: Collection[tuple[str, int]] = (),
+) -> dict[str, set[tuple[str, int]]]:
+    """`compelled_lines`, per definition: "<file>:<qualified name>" to its lines.
+
+    The names are what `check_changed_line_coverage` writes into `basis`
+    for each definition it spared, so a pass says which baseline
+    definitions it did not judge rather than only how many lines. The
+    file is spelled as `baseline_sources` spells it (relative); the lines
+    are keyed with `prefix`, as `compelled_lines` keys them.
+    """
+    reached = set(covered)
+    compelled: dict[str, set[tuple[str, int]]] = {}
     for rel, text in baseline_sources.items():
         before = _public_definitions(text)
         if not before:
             continue
         key = str(PurePath(prefix) / rel) if prefix else rel
-        for whole, body in _definition_lines(sources.get(rel, ""), before).values():
+        for name, (whole, body) in _definition_lines(sources.get(rel, ""), before).items():
             if {(key, line) for line in body} & reached:
                 continue
-            compelled |= {(key, line) for line in whole}
+            compelled[f"{rel}:{name}"] = {(key, line) for line in whole}
     return compelled
+
+
+SPARED_DEFS: Final = "spared-defs="
+"""The `basis` field of `check_changed_line_coverage` naming each baseline
+definition whose changed lines it did not judge (`compelled_definitions`)."""
+
+
+def spared_definitions(basis: str) -> list[str]:
+    """The definitions a coverage `basis` says were spared; [] if none."""
+    for field in basis.split():
+        if field.startswith(SPARED_DEFS):
+            return [n for n in field.removeprefix(SPARED_DEFS).split(",") if n]
+    return []
 
 
 def check_changed_line_coverage(
@@ -418,7 +451,7 @@ def check_changed_line_coverage(
     covered: set[tuple[str, int]],
     minimum: float,
     owed: Collection[str] = (),
-    compelled: Collection[tuple[str, int]] = (),
+    compelled: Collection[tuple[str, int]] | Mapping[str, Collection[tuple[str, int]]] = (),
     writable: bool = True,
 ) -> GateCheck:
     """Every changed line must be executed; `minimum` is the declared threshold.
@@ -438,7 +471,10 @@ def check_changed_line_coverage(
     `compelled` is the lines `public-deletions` will not let the change
     drop. They are removed from the judgement entirely, because failing
     a change for not covering code it was forbidden to delete asks it
-    for a diff that does not exist -- see `compelled_lines`.
+    for a diff that does not exist -- see `compelled_lines`. Given per
+    definition (`compelled_definitions`), `basis` also names each one a
+    changed line was spared from, `spared-defs=<file>:<name>,...`: a pass
+    that judged nothing in them says which.
 
     `writable=False` says the change may not write tests at all; with
     nothing owed, its uncovered lines are then deferred as unreachable
@@ -452,10 +488,15 @@ def check_changed_line_coverage(
     # Lines `public-deletions` compels are not judged here at all -- they
     # leave the denominator, not just the shortfall, or the percentage
     # sinks the change for code it was required to carry.
-    spared = changed & set(compelled)
+    by_def = compelled if isinstance(compelled, Mapping) else {"": compelled}
+    lines = {line for group in by_def.values() for line in group}
+    spared = changed & lines
     # Only recorded when it happened, so the common case's basis stays
     # short.
     note = f" compelled-lines={len(spared)}" if spared else ""
+    names = sorted(name for name, group in by_def.items() if name and changed & set(group))
+    if names:
+        note += f" {SPARED_DEFS}{','.join(names)}"
     judged = changed - spared
     if not judged:
         return GateCheck(
@@ -1668,7 +1709,7 @@ def run_tier1(node: Node, inputs: Tier1Inputs) -> Tier1Result:
             inputs.covered,
             gate.changed_line_coverage_min,
             inputs.owed_tests,
-            compelled_lines(
+            compelled_definitions(
                 inputs.baseline_sources, inputs.sources, inputs.workdir, inputs.covered
             ),
             writable=may_write_tests,
