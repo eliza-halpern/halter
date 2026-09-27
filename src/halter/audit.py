@@ -79,9 +79,7 @@ _COPY_IGNORE_ANY_DEPTH: Final[frozenset[str]] = frozenset(
 # the tree (`pkg/mutants/__init__.py`), and the `.coverage.` prefix rule in
 # `_audit_ignore` must not eat a same-prefixed project file (`.coveragerc`,
 # a project's own coverage config, is not `.coverage.*`).
-_COPY_IGNORE_TOP_LEVEL: Final[frozenset[str]] = frozenset(
-    {".halter", "mutants", ".coverage"}
-)
+_COPY_IGNORE_TOP_LEVEL: Final[frozenset[str]] = frozenset({".halter", "mutants", ".coverage"})
 
 # Check name -> the reason printed as its detail. Each of these checks judges
 # the change against a declaration a bare diff does not carry.
