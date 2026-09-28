@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-09-28)
+
+Adds the tier-2 survivor shortlist, bringing `halter --tier2 shortlist` to
+parity with `saddle audit --tier2 shortlist` as of saddle 48eb6d6. Without
+`--tier2 shortlist`, verdicts, text reports and exit codes are unchanged.
 
 - **Loosened, opt-in (`--tier2 shortlist`, implies `--tiered`):** tier 2's
   mutation finding is decided on the surviving changed-line mutants, not
@@ -12,7 +16,8 @@
   how many survivors the detail names (default 5). The default,
   `--tier2 score`, is unchanged.
 - **Tightened (cache):** the check surface also hashes
-  `halter/mutant_text.py`, whose classes the shortlist reads.
+  `halter/mutant_text.py`, whose classes the shortlist reads. Verdicts
+  cached by 0.1.3 miss once and are recomputed.
 
 ## 0.1.3 (2026-09-26)
 
