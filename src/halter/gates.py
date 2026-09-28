@@ -20,9 +20,10 @@ from pathlib import PurePath
 from typing import TYPE_CHECKING, Final
 
 from halter.dag import Node
+from halter.mutant_text import PHRASES, classify, function_of, parse_show
 
 if TYPE_CHECKING:
-    from halter.evidence import MutationOutcome
+    from halter.evidence import MutationOutcome, SurvivorDetail
 
 # pytest exit codes that carry red-phase evidence (see `check_red_phase`).
 PYTEST_TESTS_FAILED: Final = 1
@@ -1662,6 +1663,124 @@ def check_mutation(outcome: MutationOutcome, threshold: float) -> GateCheck:
             f"({percent:.1f}% >= {required:.1f}%){excluded}"
         ),
         basis=f"sampled n={outcome.total}",
+    )
+
+
+DEFAULT_MUTANT_SHORTLIST: Final = 5
+"""How many surviving mutants a shortlist finding names (`--mutant-shortlist`)."""
+
+
+def shortlist_order(details: Sequence[SurvivorDetail]) -> list[SurvivorDetail]:
+    """Survivors in the order a shortlist names them: one per changed line
+    first, by path and line, then the rest in the same order."""
+    ranked = sorted(details, key=lambda d: (d[2], d[3], d[0]))
+    first: list[SurvivorDetail] = []
+    rest: list[SurvivorDetail] = []
+    seen: set[tuple[str, int]] = set()
+    for d in ranked:
+        (rest if (d[2], d[3]) in seen else first).append(d)
+        seen.add((d[2], d[3]))
+    return first + rest
+
+
+SET_ASIDE_KINDS: Final = ("equivalent", "text")
+"""`mutant_text.classify` kinds the shortlist sets aside by static rule."""
+
+
+def set_aside_kind(detail: SurvivorDetail) -> str | None:
+    """`equivalent` or `text` when `mutant_text.classify` puts this survivor
+    there, else None. A static rule over the mutant's own diff, never a
+    claim: `untested` and `behaviour` survivors are never set aside."""
+    _, before, after = parse_show(detail[4])
+    kind = classify(detail[1], function_of(detail[0]), before, after)
+    return kind if kind in SET_ASIDE_KINDS else None
+
+
+def check_mutation_shortlist(
+    outcome: MutationOutcome,
+    threshold: float,
+    *,
+    shortlist: int = DEFAULT_MUTANT_SHORTLIST,
+    accepted: Collection[tuple[str, int]] = (),
+    sources: Mapping[str, str] | None = None,
+) -> GateCheck:
+    """Pass iff no surviving mutant on a changed line lacks an accepted reason.
+
+    Scope narrowed from `check_mutation`: the kill rate against `threshold`
+    is still computed and recorded in `basis`, but it no longer decides.
+    What decides is each survivor -- `no tests` ones included, since a
+    mutant no test runs is a missing test -- either dying or sitting on a
+    line in `accepted` (a checked reason). A survivor whose every change
+    sits in the argument of a raised exception or a logging call
+    (`evidence.message_only_mutant`, by AST) is excluded and counted, as
+    text-only mutants are, and one `mutant_text.classify` puts in a
+    `SET_ASIDE_KINDS` class is set aside and named with the rule. The
+    detail names up to `shortlist` of the open survivors
+    (`shortlist_order`), each with its line, its mutation and, given
+    `sources`, the changed line's text.
+
+    Only `--tier2 shortlist` calls this; `--tier2 score` (the default)
+    keeps `check_mutation`.
+
+    An engine failure or an empty population is `check_mutation`'s verdict
+    unchanged: no mutants decided is no evidence, never a pass.
+    """
+    if outcome.total == 0:
+        return check_mutation(outcome, threshold)
+    percent = 100.0 * outcome.killed / outcome.total
+    basis = (
+        f"sampled n={outcome.total}; score {percent:.1f}% vs {threshold:.1f}% "
+        "(recorded, not decisive)"
+    )
+    allowed = set(accepted)
+    messages = [d for d in outcome.survivor_details if d[5]]
+    aside = [(d, k) for d in outcome.survivor_details if not d[5] if (k := set_aside_kind(d))]
+    set_names = {d[0] for d, _ in aside}
+    judged = [d for d in outcome.survivor_details if not d[5] and d[0] not in set_names]
+    open_ = [d for d in shortlist_order(judged) if (d[2], d[3]) not in allowed]
+    waived = len(judged) - len(open_)
+    note = f"; {len(messages)} message-only survivor(s) excluded" if messages else ""
+    if waived:
+        note += f"; {waived} survivor(s) on lines with an accepted reason"
+    untested = sum(1 for d in open_ if d[1] == "no tests")
+    if untested:
+        note += f"; {untested} untested (no test runs the mutated function)"
+    if aside:
+        note += f"; {len(aside)} set aside by a static rule"
+    aside_rows = "".join(
+        f"\n- set aside: {d[2]}:{d[3]} mutant {d[0]} ({k}: {PHRASES[k]})"
+        for d, k in sorted(aside, key=lambda x: (x[0][2], x[0][3], x[0][0]))
+    )
+    if not open_:
+        return GateCheck(
+            name="mutation",
+            passed=True,
+            detail=(
+                f"killed {outcome.killed} of {outcome.total} changed-line mutants; "
+                f"no survivor without an accepted reason{note}" + aside_rows
+            ),
+            basis=basis,
+        )
+    shown = open_[: max(shortlist, 0)]
+    rows = []
+    for name, status, path, line, text, _ in shown:
+        source = (sources or {}).get(path)
+        lines = source.splitlines() if source is not None else []
+        at = f" `{lines[line - 1].strip()}`" if 0 < line <= len(lines) else ""
+        mutation = " -> ".join(t.strip() for t in text.splitlines()) or "(no diff shown)"
+        rows.append(f"- {path}:{line}{at}: mutant {name} ({status}): {mutation}")
+    more = f"\n(and {len(open_) - len(shown)} more)" if len(open_) > len(shown) else ""
+    return GateCheck(
+        name="mutation",
+        passed=False,
+        detail=(
+            f"{len(open_)} surviving mutant(s) on changed lines have no accepted reason "
+            f"(killed {outcome.killed} of {outcome.total}){note}; shortlist:\n"
+            + "\n".join(rows)
+            + more
+            + aside_rows
+        ),
+        basis=basis,
     )
 
 

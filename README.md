@@ -67,8 +67,9 @@ the flag, halter's report, JSON and verdict are exactly as before.
   dead-code, assertion-preservation, mutation, property-coverage,
   red-phase, requirement-binding), `scope` (node-scope, target-scope) or
   `unknown` (a `blocked` tier 2, or a mutation tool that decided nothing).
-- Finding verdicts are `pass`, `fail`, `not-applicable` or `blocked`; the
-  run's verdict is `accept` only when every tier passed. Exit codes are
+- Finding verdicts are `pass`, `fail`, `not-applicable` or `blocked`
+  (`not-proven` too under `--tier2 shortlist`, below); the run's verdict is
+  `accept` only when every tier passed. Exit codes are
   the same four as the default mode; an unchanged tree prints the default
   mode's `nothing to audit` report and exits 3.
 - Tier 1 and tier 2 each run the test command, so a tiered audit runs the
@@ -81,6 +82,34 @@ With `--json` the output is `{"verdict": ..., "tiers": [{"tier", "key",
 "passed", "cached", "findings": [{"gate", "tier", "verdict", "reason",
 "detail", "cites"}]}]}`; `cites` names the function the verdict came from,
 then the check's basis when it has one.
+
+### Tier 2 as a survivor shortlist
+
+`halter --tier2 shortlist` (it implies `--tiered`) changes what tier 2's
+`mutation` finding decides on. The default, `--tier2 score`, is the
+kill-rate bar and is unchanged.
+
+- The kill rate is still computed and shown in `cites`, marked "recorded,
+  not decisive". What the finding reports is each surviving changed-line
+  mutant, `no tests` ones included, one per line first. The detail names
+  up to `--mutant-shortlist N` of them (default 5) with the file, line, the
+  line's text and the mutation, then "(and K more)".
+- A survivor whose only change is inside the argument of a raised
+  exception or a logging call (decided on the AST) is excluded and
+  counted. One whose change is only message or field-name text, or the one
+  known equivalent pattern (`Decimal(1)` to `Decimal(2)` as a quantize
+  exponent), is set aside and named with the rule. Survivors in untested
+  code or that change behaviour are never set aside.
+- An open survivor makes the finding `not-proven`, and a changed line no
+  test runs makes tier 1's `coverage` finding `not-proven` rather than
+  `fail`, so tier 2 still runs. **`not-proven` does not refuse**: it is
+  reported, and the run can still `accept`. Every other check refuses as
+  in the default mode.
+- With `--json`, tier 2 also carries `survivors`: every open survivor as
+  `{path, line, name, status, mutation, source, behaviour}`, where
+  `behaviour` is the enclosing function's name and the first line of its
+  docstring.
+- The shortlist mode and `N` are part of the cache key.
 
 ## Exit codes
 
@@ -104,6 +133,7 @@ exit code is the same.
     halter --json                # machine-readable result
     halter --no-cache            # neither read nor write the verdict cache
     halter --tiered              # tiers 0-2, one finding per check
+    halter --tier2 shortlist     # tiered; tier 2 names surviving mutants
 
 In `REV` mode the commit is checked out in a temporary clone, so nothing
 uncommitted in the source repository reaches the checks and nothing is

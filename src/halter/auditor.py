@@ -24,6 +24,13 @@ baseline, the test command, the declaration and `audit.gate_surface()`, so an
 identical tree is never checked twice at the same tier. Tier 0 is keyed by
 the file's path and bytes instead, since it sees one file and no tree.
 
+`--tier2 shortlist` (`AuditorConfig.tier2`) changes two verdicts. Tier 2's
+`mutation` is decided by `gates.check_mutation_shortlist` on the surviving
+changed-line mutants, not on the kill rate, and an open survivor is
+`not-proven`; tier 1's failing `coverage` becomes `not-proven` too, so tier 2
+runs. `not-proven` is reported and does not refuse. `Findings.survivors`
+lists every open survivor with its line, mutation and enclosing function.
+
 A bare diff declares nothing, so the four declaration-relative checks are
 `not-applicable` here exactly as in `audit.audit_tree` (`audit.NOT_APPLICABLE`).
 
@@ -42,6 +49,7 @@ import dataclasses
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -59,10 +67,22 @@ from halter.audit import (
     gate_surface,
     staged_copy,
 )
-from halter.evidence import ruff_argv, ruff_findings, run_capture
-from halter.gates import GateCheck, RuffFinding, check_ruff, check_syntax, introduced_findings
+from halter.evidence import MutationOutcome, ruff_argv, ruff_findings, run_capture
+from halter.gates import (
+    DEFAULT_MUTANT_SHORTLIST,
+    GateCheck,
+    RuffFinding,
+    check_mutation_shortlist,
+    check_ruff,
+    check_syntax,
+    introduced_findings,
+    set_aside_kind,
+    shortlist_order,
+)
 
-Verdict = Literal["pass", "fail", "not-applicable", "blocked"]
+Verdict = Literal["pass", "fail", "not-applicable", "blocked", "not-proven"]
+Tier2Mode = Literal["score", "shortlist"]
+TIER2_MODES: Final[tuple[Tier2Mode, ...]] = ("score", "shortlist")
 Reason = Literal["code-wrong", "evidence-thin", "scope", "unknown"]
 
 # Which check runs at which tier; `Auditor` emits them in exactly this order.
@@ -129,6 +149,22 @@ _TOOL_FAILURE_PREFIXES: Final = ("mutation tool failed", "mutation not measured"
 
 
 @dataclass(frozen=True)
+class Survivor:
+    """One surviving changed-line mutant, as a shortlist names it."""
+
+    path: str
+    line: int
+    name: str
+    status: str
+    mutation: str
+    """The mutant's removed and added lines (`evidence.mutation_text`)."""
+    source: str
+    """The changed line's own text, stripped."""
+    behaviour: str
+    """What the line serves: the enclosing function's name and docstring's first line."""
+
+
+@dataclass(frozen=True)
 class Finding:
     """One check's verdict at one tier."""
 
@@ -148,6 +184,10 @@ class Findings:
     key: str
     findings: tuple[Finding, ...]
     cached: bool = False
+    survivors: tuple[Survivor, ...] = ()
+    """`--tier2 shortlist` only: the tier-2 mutation finding's open survivors,
+    all of them, in shortlist order (its detail names the first few). Empty,
+    and absent from `to_dict`, otherwise."""
     mutant_detail: tuple[tuple[str, str, str], ...] = ()
     """Tier 2 only: (name, status, show) for every scored mutant
     (`MutationOutcome.mutant_detail`); absent from `to_dict` when empty.
@@ -155,7 +195,7 @@ class Findings:
 
     @property
     def passed(self) -> bool:
-        return all(f.verdict in ("pass", "not-applicable") for f in self.findings)
+        return all(f.verdict in ("pass", "not-applicable", "not-proven") for f in self.findings)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -164,6 +204,11 @@ class Findings:
             "passed": self.passed,
             "cached": self.cached,
             "findings": [dataclasses.asdict(f) for f in self.findings],
+            **(
+                {"survivors": [dataclasses.asdict(v) for v in self.survivors]}
+                if self.survivors
+                else {}
+            ),
             **(
                 {
                     "mutant_detail": [
@@ -183,6 +228,7 @@ class Findings:
             tier=int(str(data["tier"])),
             key=str(data["key"]),
             findings=tuple(Finding(**{**f, "cites": tuple(f["cites"])}) for f in raw),
+            survivors=tuple(Survivor(**v) for v in data.get("survivors", ())),  # type: ignore[attr-defined]
             mutant_detail=tuple(
                 (d["name"], d["status"], d["show"])
                 for d in data.get("mutant_detail", ())  # type: ignore[attr-defined]
@@ -195,6 +241,14 @@ class AuditorConfig:
     test_command: str = AUDIT_TEST_COMMAND
     cache_dir: Path | None = None
     extra_import_roots: tuple[str, ...] = field(default=("src",))
+    tier2: Tier2Mode = "score"
+    """`--tier2`: "score" (default) is the kill-rate verdict, byte for byte as
+    before. "shortlist" decides tier 2 on open survivors
+    (`gates.check_mutation_shortlist`) and makes coverage a locator: an
+    uncovered changed line or an open survivor is `not-proven`, which is
+    reported and does not refuse."""
+    mutant_shortlist: int = DEFAULT_MUTANT_SHORTLIST
+    """How many open survivors a mutation finding's detail names (`--mutant-shortlist`)."""
 
 
 def _reason(gate: str, verdict: Verdict, detail: str) -> Reason:
@@ -210,6 +264,72 @@ def _finding(gate: str, tier: int, verdict: Verdict, detail: str, basis: str | N
 
 def _from_check(check: GateCheck, tier: int) -> Finding:
     return _finding(check.name, tier, "pass" if check.passed else "fail", check.detail, check.basis)
+
+
+def _rooted(outcome: MutationOutcome, copy: Path) -> MutationOutcome:
+    """`outcome` with every survivor path relative to the audited tree's root."""
+
+    def rel(path: str) -> str:
+        return os.path.relpath(path, copy) if os.path.isabs(path) else path
+
+    return dataclasses.replace(
+        outcome,
+        survivor_details=tuple(
+            (name, status, rel(path), line, text, message)
+            for name, status, path, line, text, message in outcome.survivor_details
+        ),
+    )
+
+
+def _sources(copy: Path, outcome: MutationOutcome) -> dict[str, str]:
+    """The text of every file a survivor sits in, read from the audited copy."""
+    found: dict[str, str] = {}
+    for _, _, path, _, _, _ in outcome.survivor_details:
+        target = copy / path
+        if path not in found and target.is_file():
+            found[path] = target.read_text()
+    return found
+
+
+def behaviour_at(source: str, line: int) -> str:
+    """The innermost def containing `line`: its name and its docstring's first line."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "module top level"
+    best: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.lineno <= line <= (node.end_lineno or node.lineno)
+            and (best is None or node.lineno > best.lineno)
+        ):
+            best = node
+    if best is None:
+        return "module top level"
+    doc = ast.get_docstring(best)
+    first = doc.strip().splitlines()[0] if doc and doc.strip() else ""
+    return f"`{best.name}`" + (f": {first}" if first else "")
+
+
+def _survivors(outcome: MutationOutcome, sources: dict[str, str]) -> tuple[Survivor, ...]:
+    found = []
+    judged = [d for d in outcome.survivor_details if not d[5] and set_aside_kind(d) is None]
+    for name, status, path, line, text, _ in shortlist_order(judged):
+        source = sources.get(path, "")
+        lines = source.splitlines()
+        found.append(
+            Survivor(
+                path=path,
+                line=line,
+                name=name,
+                status=status,
+                mutation=text,
+                source=lines[line - 1].strip() if 0 < line <= len(lines) else "",
+                behaviour=behaviour_at(source, line),
+            )
+        )
+    return tuple(found)
 
 
 def check_imports(path: str, source: str, roots: Sequence[Path]) -> GateCheck:
@@ -270,7 +390,18 @@ class Auditor:
 
     def _key(self, tier: int, *parts: str) -> str:
         payload = json.dumps(
-            [tier, *parts, self.config.test_command, self.node.model_dump_json(), gate_surface()]
+            [
+                tier,
+                *parts,
+                self.config.test_command,
+                self.node.model_dump_json(),
+                gate_surface(),
+                *(
+                    ["shortlist", self.config.mutant_shortlist]
+                    if self.config.tier2 == "shortlist"
+                    else []
+                ),
+            ]
         )
         return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -357,17 +488,45 @@ class Auditor:
             gated = runner.run_node_gate(self.node, copy, baseline=resolved, tier2=tier == 2)
             checks, _ = audit_checks(gated.checks, gated.mutation, copy)
             statuses = {c.name: (c.status, c.detail, c.basis) for c in checks}
+            if self.config.tier2 == "shortlist" and statuses.get("coverage", ("",))[0] == "fail":
+                # Coverage is a locator under the shortlist: an uncovered changed
+                # line is "not proven", never a refusal; the detail keeps its lines.
+                statuses["coverage"] = ("not-proven", *statuses["coverage"][1:])
+            survivors: tuple[Survivor, ...] = ()
             scored = gated.mutation.mutant_detail if gated.mutation is not None else ()
+            cites: dict[str, str] = {}
+            if self.config.tier2 == "shortlist" and tier == 2 and gated.mutation is not None:
+                outcome = _rooted(gated.mutation, copy)
+                sources = _sources(copy, outcome)
+                shortlisted = check_mutation_shortlist(
+                    outcome,
+                    self.node.deterministic_gate.mutation_sample.kill_threshold,
+                    shortlist=self.config.mutant_shortlist,
+                    sources=sources,
+                )
+                # An open survivor is surfaced as "not proven", never a refusal.
+                statuses["mutation"] = (
+                    "pass" if shortlisted.passed else "not-proven",
+                    shortlisted.detail,
+                    shortlisted.basis,
+                )
+                cites["mutation"] = "halter.gates.check_mutation_shortlist"
+                if not shortlisted.passed:
+                    survivors = _survivors(outcome, sources)
         wanted = TIER1 if tier == 1 else TIER2
         findings = []
         for gate in wanted:
             status, detail, basis = statuses["tests" if gate == "full-suite" else gate]
-            findings.append(_finding(gate, tier, status, detail, basis))  # type: ignore[arg-type]
+            found = _finding(gate, tier, status, detail, basis)  # type: ignore[arg-type]
+            if gate in cites:
+                found = dataclasses.replace(found, cites=(cites[gate], *found.cites[1:]))
+            findings.append(found)
         return self._store(
             Findings(
                 tier=tier,
                 key=key,
                 findings=tuple(findings),
+                survivors=survivors,
                 mutant_detail=scored if tier == 2 else (),
             )
         )

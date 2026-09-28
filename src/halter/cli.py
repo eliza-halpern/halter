@@ -1,17 +1,21 @@
 """The `halter` command.
 
 `halter [REV] [--repo R] [--baseline B] [--test-command C] [--json]
-[--cache DIR | --no-cache] [--tiered]` audits one tree of a git repository
-against a baseline commit and exits 0 (accept), 1 (refuse), 2 (could not
-audit) or 3 (nothing to audit). `--tiered` runs the same checks as tiers
-0-2 (`halter.auditor`) and reports findings instead of checks, under the
-same exit codes. `run_audit` does the work; `build_parser` declares the
+[--cache DIR | --no-cache] [--tiered] [--tier2 {score,shortlist}]
+[--mutant-shortlist N]` audits one tree of a git repository against a
+baseline commit and exits 0 (accept), 1 (refuse), 2 (could not audit) or 3
+(nothing to audit). `--tiered` runs the same checks as tiers 0-2
+(`halter.auditor`) and reports findings instead of checks, under the same
+exit codes. `--tier2 shortlist` implies `--tiered` and decides tier 2 on the
+surviving mutants instead of the kill rate. `run_audit` does the work; `build_parser` declares the
 arguments; `main` joins the two.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import functools
 import json
 import sys
 import tempfile
@@ -20,8 +24,9 @@ from typing import IO, Final
 
 from halter import __version__, audit
 from halter.audit import AuditError, AuditResult, audit_tree
-from halter.auditor import Auditor, AuditorConfig, Findings
+from halter.auditor import TIER2_MODES, Auditor, AuditorConfig, Findings, Tier2Mode
 from halter.evidence import run_capture
+from halter.gates import DEFAULT_MUTANT_SHORTLIST
 
 AUDIT_EXIT_CODES: Final = {"accept": 0, "refuse": 1, "nothing-to-audit": 3}
 AUDIT_COULD_NOT_AUDIT: Final = 2
@@ -62,7 +67,14 @@ def run_audit(args: argparse.Namespace, *, stdout: IO[str], stderr: IO[str]) -> 
     """
     cache = None if args.no_cache else Path(args.cache).expanduser()
     rev: str | None = args.rev
-    audit_one = _tiered_audit if args.tiered else audit_tree
+    shortlist = args.tier2 == "shortlist"
+    audit_one = (
+        functools.partial(_tiered_audit, tier2="shortlist", mutant_shortlist=args.mutant_shortlist)
+        if shortlist
+        else _tiered_audit
+        if args.tiered
+        else audit_tree
+    )
     try:
         if rev is None:
             result = audit_one(
@@ -110,11 +122,21 @@ def run_audit(args: argparse.Namespace, *, stdout: IO[str], stderr: IO[str]) -> 
 
 
 def _tiered_audit(
-    tree: Path, baseline: str, *, test_command: str, cache: Path | None
+    tree: Path,
+    baseline: str,
+    *,
+    test_command: str,
+    cache: Path | None,
+    tier2: Tier2Mode = "score",
+    mutant_shortlist: int = DEFAULT_MUTANT_SHORTLIST,
 ) -> tuple[Findings, ...] | AuditResult:
     """`halter --tiered`: tiers 0-2 (`halter.auditor`) over the same tree
-    `audit_tree` would audit; an unchanged tree is `nothing-to-audit` as there."""
-    auditor = Auditor(tree, baseline, AuditorConfig(test_command=test_command, cache_dir=cache))
+    `audit_tree` would audit; an unchanged tree is `nothing-to-audit` as there.
+    `--tier2 shortlist` implies `--tiered`."""
+    config = AuditorConfig(test_command=test_command, cache_dir=cache)
+    if tier2 == "shortlist":
+        config = dataclasses.replace(config, tier2=tier2, mutant_shortlist=mutant_shortlist)
+    auditor = Auditor(tree, baseline, config)
     try:
         return auditor.audit()
     except AuditError as exc:
@@ -180,6 +202,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--tiered",
         action="store_true",
         help="Run the tiered battery (tier 0 per changed file, tier 1, tier 2).",
+    )
+    parser.add_argument(
+        "--tier2",
+        choices=list(TIER2_MODES),
+        default="score",
+        help="Tier-2 mutation verdict: 'score' (default) is the kill-rate bar, unchanged; "
+        "'shortlist' (implies --tiered) names each surviving changed-line mutant and "
+        "reports survivors and uncovered changed lines as not-proven, which does not "
+        "refuse.",
+    )
+    parser.add_argument(
+        "--mutant-shortlist",
+        type=int,
+        default=DEFAULT_MUTANT_SHORTLIST,
+        metavar="N",
+        help="With --tier2 shortlist: how many surviving mutants the mutation finding "
+        f"names (default: {DEFAULT_MUTANT_SHORTLIST}).",
     )
     return parser
 

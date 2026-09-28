@@ -438,6 +438,8 @@ def scoped_targets(targets: Collection[str], scope: Collection[str]) -> tuple[st
 
 
 type MutantDetail = tuple[str, str, str]  # (name, status, mutmut show text)
+type SurvivorDetail = tuple[str, str, str, int, str, bool]
+"""(name, status, path, line, mutation text, message-only) of one survivor."""
 
 
 @dataclass(frozen=True)
@@ -468,11 +470,162 @@ class MutationOutcome:
     # maps SIGKILL and SIGSEGV both to "segfault", and can escalate a
     # timeout to it). A mutmut failure (`total == 0`) leaves it empty.
     statuses: tuple[tuple[str, int], ...] = ()
+    # One row per survivor, for `--tier2 shortlist`: (name, status, path as
+    # the caller spelled it, the first changed line it locates to, the
+    # mutation as mutmut shows it -- its removed and added hunk lines only
+    # -- and whether `message_only_mutant` holds). The same population as
+    # `survivors`, in name order; only `gates.check_mutation_shortlist`
+    # reads it. Not compared and not in either `--json` report, so
+    # `--tier2 score` is unchanged.
+    survivor_details: tuple[SurvivorDetail, ...] = field(default=(), compare=False)
     mutant_detail: tuple[MutantDetail, ...] = field(default=(), compare=False)
     """(name, status, mutmut show text) for EVERY scored mutant, killed ones
     included, in name order; a mutant mutmut never scored (`not checked`) or
     that is not in `total` has none. Recording only: no verdict reads it, and
     neither `--json` report prints it (the tiered verdict cache keeps it)."""
+
+
+def mutation_text(show_output: str) -> str:
+    """The `-`/`+` hunk lines of a `mutmut show` diff, headers dropped."""
+    return "\n".join(
+        line
+        for line in show_output.splitlines()
+        if line[:1] in "-+" and not line.startswith(("--- ", "+++ "))
+    )
+
+
+_LOG_METHODS: Final = frozenset(
+    {"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log"}
+)
+_EXCEPTION_SUFFIXES: Final = ("Error", "Exception", "Warning")
+
+
+def _callee(call: ast.Call) -> tuple[str, str]:
+    """(receiver name, called name) of a call: `log.info` -> ("log", "info")."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return "", func.id
+    if isinstance(func, ast.Attribute):
+        owner = func.value
+        receiver = (
+            owner.id
+            if isinstance(owner, ast.Name)
+            else owner.attr
+            if isinstance(owner, ast.Attribute)
+            else ""
+        )
+        return receiver, func.attr
+    return "", ""
+
+
+def _is_message_call(call: ast.Call, parent: ast.AST | None) -> bool:
+    """A call whose arguments are only a message: an exception constructor
+    (raised, or named `*Error`/`*Exception`/`*Warning`) or a logging call."""
+    receiver, name = _callee(call)
+    if isinstance(parent, ast.Raise) and parent.exc is call:
+        return True
+    if name.endswith(_EXCEPTION_SUFFIXES):
+        return True
+    return name in _LOG_METHODS and "log" in receiver.lower()
+
+
+def _differences(
+    old: ast.AST, new: ast.AST, trail: tuple[tuple[ast.AST, str], ...] = ()
+) -> list[tuple[tuple[ast.AST, str], ...]]:
+    """Where two trees differ, each as the trail of (old ancestor, field) down to it."""
+    if type(old) is not type(new):
+        return [trail]
+    found: list[tuple[tuple[ast.AST, str], ...]] = []
+    for name, left in ast.iter_fields(old):
+        if name in ("ctx", "type_comment"):
+            continue
+        right = getattr(new, name, None)
+        step = (*trail, (old, name))
+        if isinstance(left, ast.AST) and isinstance(right, ast.AST):
+            found.extend(_differences(left, right, step))
+        elif isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
+            for a, b in zip(left, right, strict=True):
+                if isinstance(a, ast.AST) and isinstance(b, ast.AST):
+                    found.extend(_differences(a, b, step))
+                elif a != b:
+                    found.append(step)
+        elif left != right:
+            found.append(step)
+    return found
+
+
+def _in_message_argument(trail: tuple[tuple[ast.AST, str], ...]) -> bool:
+    """The difference sits inside an argument of a message call (`_is_message_call`)."""
+    for index, (node, name) in enumerate(trail):
+        if isinstance(node, ast.Call) and name in ("args", "keywords"):
+            parent = trail[index - 1][0] if index else None
+            if _is_message_call(node, parent):
+                return True
+    return False
+
+
+def _mutated_source(show_output: str, source: str, mutant_name: str) -> str | None:
+    """`source` with the mutant's hunk applied, or None when it cannot be placed.
+
+    The removed lines are found as one contiguous block inside the def
+    mutmut mutated (`_mutant_def`), at that def's indentation added back
+    (mutmut shows the def at column 0, as `_mutant_lines` explains); a
+    name of neither production shape searches the whole file as written.
+    """
+    removed = [
+        line[1:]
+        for line in show_output.splitlines()
+        if line.startswith("-") and not line.startswith("--- ")
+    ]
+    added = [
+        line[1:]
+        for line in show_output.splitlines()
+        if line.startswith("+") and not line.startswith("+++ ")
+    ]
+    if not removed:
+        return None
+    lines = source.splitlines()
+    start, end, indent = 1, len(lines), ""
+    match = _MUTANT_NAME.match(mutant_name)
+    if match is not None:
+        try:
+            node = _mutant_def(ast.parse(source), match)
+        except SyntaxError:
+            return None
+        if node is None:
+            return None
+        start = node.decorator_list[0].lineno if node.decorator_list else node.lineno
+        end = min(node.end_lineno or node.lineno, len(lines))
+        found = re.match(r"[ \t]*", lines[node.lineno - 1])
+        indent = found.group() if found else ""
+    block = [indent + text for text in removed]
+    for first in range(start - 1, end - len(block) + 1):
+        if lines[first : first + len(block)] == block:
+            mutated = [*lines[:first], *(indent + t for t in added), *lines[first + len(block) :]]
+            return "\n".join(mutated) + "\n"
+    return None
+
+
+def message_only_mutant(show_output: str, source: str, mutant_name: str) -> bool:
+    """Every AST difference the mutant makes is inside a message argument.
+
+    A mutant that swaps the argument of a raised exception or of a
+    logging call -- `ValueError(f"...")` to
+    `ValueError(None)`, `KeyError(sku)` to `KeyError(None)` -- changes only
+    what a message says. Decided by comparing the module's AST before and
+    after the hunk, never by matching text: a mutant that also changes a
+    comparison, a call's target or anything outside those arguments is not
+    message-only. A hunk that cannot be placed or parsed is not either.
+    """
+    mutated = _mutated_source(show_output, source, mutant_name)
+    if mutated is None:
+        return False
+    try:
+        before, after = ast.parse(source), ast.parse(mutated)
+    except SyntaxError:
+        return False
+    found = _differences(before, after)
+    return bool(found) and all(_in_message_argument(trail) for trail in found)
 
 
 def _is_given(decorator: ast.expr) -> bool:
@@ -972,6 +1125,8 @@ def mutation_sample(
             msg = f"mutant lookup failed: {exc}"
             return MutationOutcome(killed=0, total=0, generated=0, survivors=(msg,))
         scoped: list[tuple[str, str, str, set[int]]] = []
+        texts: dict[str, str] = {}
+        message_only: dict[str, bool] = {}
         shown: dict[str, str] = {}
         undecided = 0
         text_only = 0
@@ -1010,7 +1165,10 @@ def mutation_sample(
                 text_only += 1
                 continue
             scoped.append((name, verdict, key, hit))
+            texts[name] = mutation_text(shown_stdout)
             shown[name] = shown_stdout
+            if verdict not in ("killed", "timeout"):
+                message_only[name] = message_only_mutant(shown_stdout, target.read_text(), name)
     sample = scoped
     killed = sum(1 for _, verdict, _, _ in sample if verdict in ("killed", "timeout"))
     # Every not-killed status is a survivor, not only "survived": `no
@@ -1027,6 +1185,11 @@ def mutation_sample(
             for line in hit
         }
     )
+    details = tuple(
+        (name, verdict, spelled[key], min(hit), texts[name], message_only[name])
+        for name, verdict, key, hit in sample
+        if verdict not in ("killed", "timeout")
+    )
     untested = sum(1 for _, verdict, _, _ in sample if verdict == "no tests")
     status_tally: dict[str, int] = {}
     for _, verdict, _, _ in sample:
@@ -1040,6 +1203,7 @@ def mutation_sample(
         survivor_lines=tuple(survivor_lines),
         untested=untested,
         statuses=tuple(sorted(status_tally.items())),
+        survivor_details=details,
         mutant_detail=tuple((name, verdict, shown[name]) for name, verdict, _, _ in sample),
     )
 

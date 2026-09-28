@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Loosened, opt-in (`--tier2 shortlist`, implies `--tiered`):** tier 2's
+  mutation finding is decided on the surviving changed-line mutants, not
+  the kill rate (recorded in `cites`, not decisive). Message-only
+  survivors are excluded by AST; statically `text` and `equivalent` ones
+  are set aside and named. An open survivor, and a changed line no test
+  runs (tier 1 `coverage`), is `not-proven`, which is reported and does
+  not refuse. Tier 2 JSON gains `survivors`. `--mutant-shortlist N` sets
+  how many survivors the detail names (default 5). The default,
+  `--tier2 score`, is unchanged.
+- **Tightened (cache):** the check surface also hashes
+  `halter/mutant_text.py`, whose classes the shortlist reads.
+
 ## 0.1.3 (2026-09-26)
 
 Brings `halter` and `halter --tiered` to parity with `saddle audit` and

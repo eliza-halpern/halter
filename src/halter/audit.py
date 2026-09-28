@@ -65,6 +65,8 @@ SURFACE_MODULES: Final[tuple[str, ...]] = (
     "halter.gates",
     "halter.evidence",
     "halter.dag",
+    # `gates.check_mutation_shortlist` sets survivors aside by its classes.
+    "halter.mutant_text",
 )
 SURFACE_TOOLS: Final[tuple[str, ...]] = ("mutmut", "ruff", "coverage")
 
@@ -149,9 +151,11 @@ class AuditResult:
 
 
 def _mutation_dict(mutation: MutationOutcome) -> dict[str, Any]:
-    """`asdict(mutation)` without `mutant_detail`: the per-mutant record is
-    not part of `halter --json`."""
+    """`asdict(mutation)` without `survivor_details` or `mutant_detail`: the
+    shortlist's in-process evidence and the per-mutant record, neither part
+    of `halter --json`."""
     data = asdict(mutation)
+    del data["survivor_details"]
     del data["mutant_detail"]
     return data
 
@@ -344,6 +348,10 @@ def _spelled_from_the_root(
             mutation,
             survivor_lines=tuple(
                 (os.path.relpath(path, copy), line) for path, line in mutation.survivor_lines
+            ),
+            survivor_details=tuple(
+                (name, status, os.path.relpath(path, copy), line, text, message)
+                for name, status, path, line, text, message in mutation.survivor_details
             ),
         )
     return checks, mutation

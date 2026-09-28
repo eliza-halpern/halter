@@ -687,6 +687,7 @@ def test_default_gate_surface_moves_with_each_tools_installed_version(
         "halter.gates",
         "halter.evidence",
         "halter.dag",
+        "halter.mutant_text",
     ],
 )
 def test_default_gate_surface_moves_with_each_check_modules_bytes(
